@@ -15,3 +15,11 @@ jobs:
         run: |
           javac --release 8 -d out-dash src/org/asa/tools/core/*.java $(find test/fakes -name '*.java') test/DashboardTest.java
           java -cp out-dash DashboardTest
+      - name: Monte Carlo - 300 random matches with injected stalls, lost encoders, brownouts, slow loops
+        run: |
+          javac --release 8 -d out-fuzz src/org/asa/tools/core/*.java src/org/asa/tools/blackbox/*.java test/BlackBoxFuzz.java
+          java -cp out-fuzz BlackBoxFuzz 300 1
+      - name: Soak - 60000 rows, 40 signals; no drops, flat memory, intact files, WPILOG export
+        run: |
+          javac --release 8 -d out-soak src/org/asa/tools/core/*.java src/org/asa/tools/blackbox/*.java test/SoakTest.java
+          java -Xmx256m -cp out-soak SoakTest

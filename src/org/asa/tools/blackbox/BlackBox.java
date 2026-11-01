@@ -77,23 +77,34 @@ public class BlackBox implements Live {
     /**
      * Standard motor checks for signals "<m>.power", "<m>.vel" and optionally "<m>.amps":
      *  - stall: high current, almost no motion, real command
-     *  - encoder lost: encoder that used to move reads 0 while the motor is driven normally
+     *  - encoder lost: encoder that used to move reads 0 while the motor is driven and draws little current
+     *    (spinning free); a motor holding a load also reads 0 but draws ~power x 9 A, so it does not trip this
      */
     public BlackBox motorRules(final String m, final double stallAmps, final double minVel) {
         final boolean hasAmps = rec.has(m + ".amps");
+        final boolean[] moved = {false};                                // has this encoder ever shown motion?
         if (hasAmps) {
-            rule(m + "-stall").forTime(0.3).show(m + ".amps", m + ".vel", m + ".power")
+            // 0.5 s: a normal spin-up also draws stall-like current for 0.1-0.3 s. A stall is a command held in one
+            // direction: a reversal restarts the count, so back-to-back reversal spikes (whose short dip between them
+            // can fall between two 100 ms current reads) never add up to a stall.
+            final double[] lastSign = {0};
+            rule(m + "-stall").forTime(0.5).show(m + ".amps", m + ".vel", m + ".power")
                     .when(new Rule.Condition() { public boolean test(Recorder r) {
-                        return r.get(m + ".amps") > stallAmps && Math.abs(r.get(m + ".vel")) < minVel && Math.abs(r.get(m + ".power")) > 0.5;
+                        double p = r.get(m + ".power"), sign = Math.signum(p);
+                        boolean reversed = sign != 0 && lastSign[0] != 0 && sign != lastSign[0];
+                        if (sign != 0) lastSign[0] = sign;
+                        return !reversed && r.get(m + ".amps") > stallAmps && Math.abs(r.get(m + ".vel")) < minVel && Math.abs(p) > 0.5;
                     }});
         }
-        final boolean[] moved = {false};
         rule(m + "-encoder-lost").forTime(0.5).severity(Rule.Severity.CRITICAL).show(m + ".power", m + ".vel")
                 .when(new Rule.Condition() { public boolean test(Recorder r) {
                     double v = r.get(m + ".vel");
                     if (Math.abs(v) > minVel) moved[0] = true;          // motors without encoder never arm this rule
-                    boolean normalCurrent = !hasAmps || r.get(m + ".amps") < stallAmps;
-                    return moved[0] && v == 0 && Math.abs(r.get(m + ".power")) > 0.5 && normalCurrent;
+                    double p = Math.abs(r.get(m + ".power"));
+                    // encoder lost = the motor spins freely (low current) but no ticks arrive. A motor holding a load
+                    // still also reads 0 ticks, but draws about power x 9 A (FTC stall current), so it is excluded.
+                    boolean spinningFree = !hasAmps || r.get(m + ".amps") < 3.6 * p;
+                    return moved[0] && v == 0 && p > 0.5 && spinningFree;
                 }});
         return this;
     }
@@ -153,7 +164,20 @@ public class BlackBox implements Live {
         loopMs = (now - lastLoopNs) / 1e6;
         lastLoopNs = now;
         rec.update();
-        double t = rec.time();
+        checkRules(rec.time());
+    }
+
+    /** Same, on a given clock (seconds since start): for simulations and replaying a log through new rules. */
+    public void update(double timeSeconds) {
+        loopMs = Double.isNaN(lastSimT) ? 0 : (timeSeconds - lastSimT) * 1000;
+        lastSimT = timeSeconds;
+        rec.update(timeSeconds);
+        checkRules(timeSeconds);
+    }
+
+    private double lastSimT = Double.NaN;
+
+    private void checkRules(double t) {
         for (Rule r : rules) {
             String w = r.check(rec, t);
             if (w == null) continue;

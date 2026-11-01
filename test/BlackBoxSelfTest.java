@@ -94,11 +94,13 @@ public class BlackBoxSelfTest {
         bb.start();
         int worst = 0;
         long end = System.nanoTime() + 1_500_000_000L;
-        while (System.nanoTime() < end) { perLoop[0] = 0; bb.update(); worst = Math.max(worst, perLoop[0]); Thread.sleep(10); }
+        int loop = 0;
+        while (System.nanoTime() < end) { perLoop[0] = 0; bb.update(); worst = Math.max(worst, perLoop[0]); Thread.sleep(++loop % 2 == 0 ? 10 : 30); }   // 10-30 ms loops
         bb.stop();
         System.out.println("  most reads in one loop: " + worst + ", longest gap: " + maxGap[0] / 1_000_000 + " ms");
         check(worst <= 2, "at most 2 slow reads per loop, got " + worst);
-        check(maxGap[0] < 200_000_000L, "every slow signal read within 200 ms, worst gap " + maxGap[0] / 1_000_000 + " ms");
+        // 9 signals, 2 per loop, ~20 ms loops: a full round takes ~5 loops (~100 ms); nobody may starve
+        check(maxGap[0] < 250_000_000L, "every slow signal read within 250 ms, worst gap " + maxGap[0] / 1_000_000 + " ms");
     }
 
     /** Log folder cannot be created: the robot keeps running and the error is reported. */

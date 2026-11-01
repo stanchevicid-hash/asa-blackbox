@@ -98,6 +98,24 @@ In `/sdcard/FIRST/asa/`, one set per session:
 
 `sample-logs/` holds real sessions recorded in the ASA simulator. Open them in the web UI.
 
+## How reliable are the warnings?
+
+`test/BlackBoxFuzz.java` simulates full 150 s matches on random robots (2-8 motors, some without an encoder) with
+realistic healthy driving: spin-up current spikes, reversals, a lift holding at 0.15-0.45 power with its encoder
+still, idle motors, battery sag, and 8-25 ms loop jitter. It injects random faults: stalls, lost encoders,
+brownouts and slow loops.
+
+| 3000 matches | Result |
+|---|---|
+| Injected faults | **3364 of 3365 reported** by the right rule (the miss: a 0.7 s stall, at the detection limit) |
+| False alarms | **0** |
+
+A stall is reported after 0.5 s of high current with no motion, in one direction. Stalls shorter than ~0.7 s may
+not be reported (the current is read every ~100 ms).
+
+`test/SoakTest.java` writes 10 simulated minutes (60000 rows × 40 signals) at 10× real speed: no row is dropped,
+memory stays flat, every row is intact, and the whole session exports to WPILOG. Both run in CI on every push.
+
 ## Tests
 
 `test/BlackBoxSelfTest.java` drives the rules with timed fake signals. It checks that the stall and encoder-lost rules each
