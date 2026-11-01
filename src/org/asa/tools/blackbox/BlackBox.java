@@ -157,7 +157,7 @@ public class BlackBox implements Live {
         for (Rule r : rules) {
             String w = r.check(rec, t);
             if (w == null) continue;
-            rec.event(r.severity().name(), w);
+            rec.event(r.severity().name(), w.substring(w.indexOf(' ') + 1));   // type already says the severity
             synchronized (warnings) {
                 warnings.addFirst(Recorder.fmt(t) + "s " + w);
                 if (warnings.size() > 20) warnings.removeLast();

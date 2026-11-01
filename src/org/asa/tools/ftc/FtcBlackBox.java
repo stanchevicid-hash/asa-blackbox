@@ -8,6 +8,7 @@ import com.qualcomm.robotcore.hardware.HardwareMap;
 import com.qualcomm.robotcore.hardware.Servo;
 
 import org.asa.tools.blackbox.BlackBox;
+import org.asa.tools.core.Dashboard;
 import org.asa.tools.core.Recorder;
 import org.firstinspires.ftc.robotcore.external.Telemetry;
 import org.firstinspires.ftc.robotcore.external.navigation.CurrentUnit;
@@ -55,13 +56,15 @@ public final class FtcBlackBox {
 
     public static BlackBox attachAll(BlackBox bb, HardwareMap hw) { return attachAll(bb, hw, 5.0); }
 
-    /** Black Box status + newest warnings on the Driver Hub. */
+    /** Black Box status + newest warnings on the Driver Hub (and FTC Dashboard graphs when installed). */
     public static void show(Telemetry t, BlackBox bb) {
         List<String> w = bb.warnings();
         String err = bb.rec.writeError();
         if (err != null) t.addLine("BlackBox NOT SAVING: " + err);
         t.addData("BlackBox", "%d warnings  loop %.1f ms%s", w.size(), bb.loopMs(), AsaWeb.url().isEmpty() ? "" : "  " + AsaWeb.url());
         for (int i = 0; i < Math.min(3, w.size()); i++) t.addLine(w.get(i));
+        // live graphs in FTC Dashboard too, if the team has it (no-op otherwise)
+        Dashboard.send(bb.names(), bb.values(), w.size() > 3 ? w.subList(0, 3) : w, 50);
     }
 
     private static String name(HardwareMap hw, Object device) {

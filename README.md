@@ -24,13 +24,26 @@ Made by **ASA, FTC team 28284**. MIT license, free for every team.
   previous sessions, e.g. `lift.amps peak 5.2 vs 3.4 (+53%)`. It catches a mechanism wearing out before it fails.
 - **Driver Hub**: warnings in telemetry. **Web UI** at `http://192.168.43.1:8099/`: live values,
   per-session graphs with event markers, reports.
+- **FTC Dashboard**: if your team uses it, every signal shows up there as a live graph automatically.
+  It is found at runtime, so there is no dependency to add.
+- **AdvantageScope**: each session downloads as a `.wpilog` from the web UI and opens in
+  [AdvantageScope](https://github.com/Mechanical-Advantage/AdvantageScope) with every signal in a tree and the
+  events on the timeline. It is validated with the official WPILib log reader. On a laptop:
+  `java -cp <classes> org.asa.tools.core.WpiLog session.csv`.
 - **Safe for matches**: file writing runs on a background thread, a failing sensor reads NaN, a full disk
   drops rows, and nothing throws into your loop.
 
-## Install
+## Install (2 minutes)
 
-Copy `src/org` into `TeamCode/src/main/java/` (Android Studio). No Gradle changes and no other dependencies.
-It works with FTC SDK 9.x through 12.x.
+**Android Studio:** download `asa-blackbox-dropin.zip` from the
+[latest release](https://github.com/stanchevicid-hash/asa-blackbox/releases/latest) and unzip it at the root of your
+FtcRobotController project. The files land in `TeamCode/src/main/java/org/asa/tools/`. Or copy `src/org` there yourself.
+
+**OnBot Java:** create the folders `org/asa/tools/core`, `org/asa/tools/ftc` and `org/asa/tools/blackbox`, then upload
+the `.java` files from the matching folders in `src/`. The library itself uses plain Java 7 syntax; only the examples use lambdas.
+
+No Gradle changes and no other dependencies. It works with FTC SDK 9.x through 12.x.
+Using both ASA libraries? Install both. The shared files are identical, so overwriting them is fine.
 
 ## Use it: 4 lines
 
@@ -100,7 +113,8 @@ java -cp out BlackBoxSelfTest
 
 - Verified: compiles against the official FTC SDK **12.0.0** and **9.2.0** (RobotCore + Hardware from Maven),
   the self-test passes, and it ran in the ASA ftc-sim simulator with every device auto-discovered and the web UI live.
-- **Not yet verified on a physical Control Hub.** If you run it on a real robot, please open an issue.
+- **Not yet verified on a physical Control Hub.** If you run it on a real robot, please
+  [send your result](https://github.com/stanchevicid-hash/asa-blackbox/issues/new?template=robot-result.yml).
 - Code runs on the Control Hub (or an RC phone). The Driver Hub shows the telemetry.
 
 Shares its core (`Recorder`, `Ftc`, `AsaWeb`) with [asa-sysid](https://github.com/stanchevicid-hash/asa-sysid). Use both: SysId tells

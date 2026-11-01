@@ -16,10 +16,62 @@ public class BlackBoxSelfTest {
 
     public static void main(String[] args) throws Exception {
         blackBox();
+        wpilog();
         slowReads();
         diskError();
         System.out.println(failures == 0 ? "\nALL PASSED" : "\n" + failures + " FAILED");
         System.exit(failures == 0 ? 0 : 1);
+    }
+
+    static File lastSession;
+
+    /** The session from blackBox() converted to WPILOG and read back with a parser written from the spec. */
+    static void wpilog() throws Exception {
+        System.out.println("WPILOG export (AdvantageScope)");
+        java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+        org.asa.tools.core.WpiLog.convert(lastSession, bytes);
+        byte[] b = bytes.toByteArray();
+        java.nio.ByteBuffer in = java.nio.ByteBuffer.wrap(b).order(java.nio.ByteOrder.LITTLE_ENDIAN);
+        byte[] magic = new byte[6]; in.get(magic);
+        check(new String(magic, "UTF-8").equals("WPILOG"), "magic");
+        check(in.getShort() == 0x0100, "version 1.0");
+        int extraLen = in.getInt();
+        in.position(in.position() + extraLen);
+        java.util.Map<Long, String> names = new java.util.HashMap<Long, String>(), types = new java.util.HashMap<Long, String>();
+        double maxAmps = 0; boolean sawWarning = false; long lastTs = -1; boolean ordered = true; int records = 0;
+        while (in.hasRemaining()) {
+            int h = in.get() & 0xFF;
+            long id = le(in, (h & 3) + 1), size = le(in, ((h >> 2) & 3) + 1), ts = le(in, ((h >> 4) & 7) + 1);
+            byte[] p = new byte[(int) size]; in.get(p);
+            java.nio.ByteBuffer pb = java.nio.ByteBuffer.wrap(p).order(java.nio.ByteOrder.LITTLE_ENDIAN);
+            if (id == 0) {
+                if (p[0] != 0) continue;
+                pb.get();
+                long eid = pb.getInt() & 0xFFFFFFFFL;
+                byte[] n = new byte[pb.getInt()]; pb.get(n);
+                byte[] t = new byte[pb.getInt()]; pb.get(t);
+                names.put(eid, new String(n, "UTF-8")); types.put(eid, new String(t, "UTF-8"));
+                continue;
+            }
+            records++;
+            if (id < names.size() && ts < lastTs) ordered = false;   // signal rows are written in time order
+            if (id < names.size()) lastTs = ts;
+            if ("ASA/lift/amps".equals(names.get(id))) maxAmps = Math.max(maxAmps, pb.getDouble());
+            if ("ASA/events".equals(names.get(id)) && new String(p, "UTF-8").contains("WARNING lift-stall")) sawWarning = true;
+        }
+        System.out.println("  " + b.length + " bytes, " + names.size() + " entries, " + records + " records");
+        check(names.containsValue("ASA/lift/amps") && "double".equals(types.get(3L)), "entries named and typed: " + names);
+        check(maxAmps == 6.0, "lift.amps values survive, max " + maxAmps);
+        check(sawWarning, "stall warning in ASA/events");
+        check(ordered, "timestamps in order");
+        java.io.FileOutputStream f = new java.io.FileOutputStream(new File(System.getProperty("java.io.tmpdir"), "asa-selftest.wpilog"));
+        f.write(b); f.close();
+    }
+
+    static long le(java.nio.ByteBuffer in, int n) {
+        long v = 0;
+        for (int k = 0; k < n; k++) v |= (long) (in.get() & 0xFF) << (8 * k);
+        return v;
     }
 
     /** 9 current-like signals at 100 ms: never more than 2 hardware reads in one loop, each still read ~every 100 ms. */
@@ -88,6 +140,7 @@ public class BlackBoxSelfTest {
         phase(bb, 0.6, 0.8, 1000, 2.0);   // free again
         phase(bb, 0.8, 0.8, 0, 1.5);      // encoder lost: driven, normal current, velocity exactly 0
         bb.stop();
+        lastSession = new File(dir, bb.rec.session() + ".csv");
 
         int stall = count(bb, "lift-stall"), lost = count(bb, "lift-encoder-lost"), intakeLost = count(bb, "intake-encoder-lost");
         check(stall == 1, "lift-stall fired once, got " + stall);
