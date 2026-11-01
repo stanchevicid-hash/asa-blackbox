@@ -1,0 +1,9 @@
+session 20261101_133128_simcheck, 3335 samples
+baseline: 1 previous sessions
+frontRight.pos mean 96.6681 vs 72.2372 (+34%)
+frontRight.vel mean 3.9994 vs 2.8852 (+39%)
+frontRight.vel peak 4.0 vs 7.0 (-43%)
+frontRight.amps mean 0.0124 vs 0.0095 (+31%)
+frontRight.amps peak 0.0131 vs 0.0204 (-36%)
+backLeft.amps peak 0.0144 vs 0.0234 (-38%)
+loop_ms peak 291.8228 vs 44.1922 (+560%)

@@ -1,0 +1,4 @@
+session 20261101_133735_simcheck, 5213 samples
+baseline: 3 previous sessions
+lift.amps mean 1.588 vs 0.8127 (+95%)
+lift.amps peak 6.0635 vs 4.3585 (+39%)

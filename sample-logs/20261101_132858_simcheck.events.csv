@@ -1,0 +1,9 @@
+t,type,detail
+2.0E-4,SESSION_START,simcheck
+0.0069,SYSID,lift QF
+5.5661,SYSID,lift QR
+5.5775,SYSID,shooter QF
+15.6,SYSID,shooter QR
+25.6391,SYSID,shooter DF
+35.6844,SYSID,shooter DR
+45.7271,SESSION_END,

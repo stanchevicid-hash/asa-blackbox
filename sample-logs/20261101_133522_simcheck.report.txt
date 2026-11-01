@@ -1,0 +1,7 @@
+session 20261101_133522_simcheck, 3435 samples
+baseline: 2 previous sessions
+lift.power mean 0.0462 vs 0.0295 (+57%)
+lift.power peak 0.6 vs 0.395 (+52%)
+lift.vel peak 2891.0 vs 96.0 (+2911%)
+lift.amps peak 6.075 vs 4.3585 (+39%)
+loop_ms peak 40.3208 vs 291.8228 (-86%)

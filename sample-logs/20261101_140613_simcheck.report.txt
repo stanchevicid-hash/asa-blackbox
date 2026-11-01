@@ -1,0 +1,5 @@
+session 20261101_140613_simcheck, 12646 samples
+baseline: 1 previous sessions
+shooter.amps mean 0.6636 vs 1.6155 (-59%)
+lift.amps mean 3.631 vs 1.5987 (+127%)
+loop_ms peak 1852.4412 vs 179.5253 (+932%)
