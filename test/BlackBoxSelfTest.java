@@ -16,8 +16,53 @@ public class BlackBoxSelfTest {
 
     public static void main(String[] args) throws Exception {
         blackBox();
+        slowReads();
+        diskError();
         System.out.println(failures == 0 ? "\nALL PASSED" : "\n" + failures + " FAILED");
         System.exit(failures == 0 ? 0 : 1);
+    }
+
+    /** 9 current-like signals at 100 ms: never more than 2 hardware reads in one loop, each still read ~every 100 ms. */
+    static void slowReads() throws Exception {
+        System.out.println("SLOW READS are spread over loops");
+        final int[] perLoop = {0};
+        final long[] last = new long[9];
+        final long[] maxGap = {0};
+        BlackBox bb = BlackBox.create("slow").dir(new File(System.getProperty("java.io.tmpdir"), "asa-slow-" + System.nanoTime()));
+        for (int i = 0; i < 9; i++) {
+            final int k = i;
+            bb.signal("m" + i + ".amps", () -> {
+                perLoop[0]++;
+                long now = System.nanoTime();
+                if (last[k] != 0) maxGap[0] = Math.max(maxGap[0], now - last[k]);
+                last[k] = now;
+                return 1.0;
+            }, 100);
+        }
+        bb.start();
+        int worst = 0;
+        long end = System.nanoTime() + 1_500_000_000L;
+        while (System.nanoTime() < end) { perLoop[0] = 0; bb.update(); worst = Math.max(worst, perLoop[0]); Thread.sleep(10); }
+        bb.stop();
+        System.out.println("  most reads in one loop: " + worst + ", longest gap: " + maxGap[0] / 1_000_000 + " ms");
+        check(worst <= 2, "at most 2 slow reads per loop, got " + worst);
+        check(maxGap[0] < 200_000_000L, "every slow signal read within 200 ms, worst gap " + maxGap[0] / 1_000_000 + " ms");
+    }
+
+    /** Log folder cannot be created: the robot keeps running and the error is reported. */
+    static void diskError() throws Exception {
+        System.out.println("DISK ERROR is reported, not thrown");
+        File blocker = File.createTempFile("asa-not-a-dir", ".tmp");   // a file where the folder should be
+        BlackBox bb = BlackBox.create("disk").dir(blocker);
+        bb.signal("x", () -> 1.0);
+        bb.start();
+        for (int i = 0; i < 20; i++) { bb.update(); Thread.sleep(5); }
+        Thread.sleep(200);
+        String err = bb.rec.writeError();
+        bb.stop();
+        System.out.println("  writeError = " + err);
+        check(err != null, "write error must be visible");
+        blocker.delete();
     }
 
     static void check(boolean ok, String what) {

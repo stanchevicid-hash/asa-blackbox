@@ -66,7 +66,10 @@ See `src/org/asa/tools/examples/ExampleTeleOpBlackBox.java`.
 
 Bulk caching is switched to AUTO on hubs where it was OFF, so position and velocity cost one bulk read.
 Motor current is not part of the bulk read (about 2 ms each), so it is sampled every 100 ms, and so is the battery.
-Each `update()` is one pass over the signals; no file IO happens on your thread.
+Rate-limited reads are spread out: at most 2 per loop, so 8 motor currents never land in the same loop
+(that would be a ~16 ms spike). Each `update()` is one pass over the signals; no file IO happens on your thread.
+If the files cannot be written (no space, bad path), the Driver Hub shows `BlackBox NOT SAVING: ...` and the
+robot keeps running.
 
 ## Files
 
@@ -85,7 +88,8 @@ In `/sdcard/FIRST/asa/`, one set per session:
 
 `test/BlackBoxSelfTest.java` drives the rules with timed fake signals. It checks that the stall and encoder-lost rules each
 fire exactly once, that a motor without an encoder never reports encoder-lost, that a throwing sensor reads NaN,
-that the files are written, and that the baseline reports a doubled stall current.
+that the files are written, that the baseline reports a doubled stall current, that no loop does more than 2 slow
+reads, and that a disk error is reported instead of thrown.
 
 ```bash
 javac --release 8 -d out src/org/asa/tools/core/*.java src/org/asa/tools/blackbox/*.java test/BlackBoxSelfTest.java

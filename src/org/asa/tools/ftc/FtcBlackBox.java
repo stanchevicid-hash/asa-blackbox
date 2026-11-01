@@ -58,6 +58,8 @@ public final class FtcBlackBox {
     /** Black Box status + newest warnings on the Driver Hub. */
     public static void show(Telemetry t, BlackBox bb) {
         List<String> w = bb.warnings();
+        String err = bb.rec.writeError();
+        if (err != null) t.addLine("BlackBox NOT SAVING: " + err);
         t.addData("BlackBox", "%d warnings  loop %.1f ms%s", w.size(), bb.loopMs(), AsaWeb.url().isEmpty() ? "" : "  " + AsaWeb.url());
         for (int i = 0; i < Math.min(3, w.size()); i++) t.addLine(w.get(i));
     }
