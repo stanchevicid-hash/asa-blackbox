@@ -1,6 +1,7 @@
 # ASA Black Box for FTC
 
 [![tests](https://github.com/stanchevicid-hash/asa-blackbox/actions/workflows/tests.yml/badge.svg)](https://github.com/stanchevicid-hash/asa-blackbox/actions/workflows/tests.yml)
+[![android](https://github.com/stanchevicid-hash/asa-blackbox/actions/workflows/android.yml/badge.svg)](https://github.com/stanchevicid-hash/asa-blackbox/actions/workflows/android.yml)
 
 **A flight recorder and health monitor for your FTC robot.** It logs every motor, servo and the battery plus
 your own signals and events. It detects problems while the robot drives and shows whether the robot is getting
@@ -113,6 +114,10 @@ java -cp out BlackBoxSelfTest
 
 - Verified: compiles against the official FTC SDK **12.0.0** and **9.2.0** (RobotCore + Hardware from Maven),
   the self-test passes, and it ran in the ASA ftc-sim simulator with every device auto-discovered and the web UI live.
+- Verified in CI on every push: only Java APIs present on **Android 7.1 (Control Hub)**, and it converts with **D8**.
+- Speed: `update()` with 40 signals and 16 rules ≈ 8.5 µs on a laptop (well under 0.1 ms on a Control Hub).
+- Web UI tested from a laptop: path-traversal attempts refused, the quit command accepted from the robot only,
+  the port handed over after a code reload, and the WPILOG download valid per the official WPILib reader.
 - **Not yet verified on a physical Control Hub.** If you run it on a real robot, please
   [send your result](https://github.com/stanchevicid-hash/asa-blackbox/issues/new?template=robot-result.yml).
 - Code runs on the Control Hub (or an RC phone). The Driver Hub shows the telemetry.
