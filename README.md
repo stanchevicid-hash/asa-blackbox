@@ -33,6 +33,22 @@ Made by **ASA, FTC team 28284**. MIT license, free for every team.
   `java -cp <classes> org.asa.tools.core.WpiLog session.csv`.
 - **Safe for matches**: file writing runs on a background thread, a failing sensor reads NaN, a full disk
   drops rows, and nothing throws into your loop.
+- **Hub resets** (static discharge, loose power): reported the moment every encoder of a hub jumps back to 0, and
+  whenever a hub stops answering. This is the usual cause of "the robot froze for half a second".
+- **Battery health**: the internal resistance of the battery and its wiring, measured from normal driving and
+  tracked per battery (`bb.battery("A")`). The report says which battery is getting worse than it used to be.
+- **Loop profiler**: `bb.section("vision")` … `bb.section("drive")` … shows where the loop time goes
+  (`loop 24 ms: vision 14 ms (59%), drive 3 ms …`).
+- **Crash capture**: `bb.crash(e)` saves the error, its stack trace and the last value of every signal.
+
+## Ready-made programs on the Driver Hub
+
+These two appear in the Driver Hub's OpMode list as soon as the library is installed. No code to write.
+
+| OpMode | What it does |
+|---|---|
+| **ASA Health Check** | Every hub (answering, temperature, voltage), each battery's health from past sessions, and every motor: hold A or B to turn the selected motor at 0.3 and see if its encoder counts and which way. A motor only turns while you hold the button. |
+| **ASA Center of Gravity** | Measures where the center of gravity is (height, front/back, left/right) with the hub's IMU: tip the robot onto its rear, front, right and left wheels until it balances, pressing A each time. It reports how hard the robot can brake, accelerate and turn before it tips, and the steepest ramp it can stand on. Do it again with the lift up to see how much the lift moves it. No motor moves. |
 
 ## Install (2 minutes)
 
@@ -72,6 +88,11 @@ bb.rule("intake-jam").forTime(0.25).show("intake.amps", "intake.vel")
   .when(r -> r.get("intake.amps") > 4 && Math.abs(r.get("intake.vel")) < 50);
 bb.notReachingRule("lift-slow", "lift.target", "lift.inches", 1.0, 1.5);
 bb.baseline("lift.cycle_s", 0.05);                            // compare your own health metric between sessions
+bb.battery("A");                                              // which battery is in: tracked across sessions
+bb.profile("vision", "drive");                                // graph these sections over time
+bb.section("vision"); /* ... */ bb.section("drive"); /* ... */ // time each part of the loop
+bb.encodersReset();                                           // you reset encoders on purpose (not a hub reset)
+try { /* loop */ } catch (RuntimeException e) { bb.crash(e); throw e; } finally { bb.stop(); }
 ```
 
 See `src/org/asa/tools/examples/ExampleTeleOpBlackBox.java`.

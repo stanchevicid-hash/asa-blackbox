@@ -40,6 +40,19 @@ public class BlackBox implements Live {
     private long lastLoopNs;
     private double loopMs;
 
+    // loop profiler: time spent in each named section of the loop
+    private final Map<String, double[]> sectionStats = new java.util.LinkedHashMap<String, double[]>();   // sum ms, max ms
+    private final Map<String, Double> sectionNow = new HashMap<String, Double>();                         // this loop
+    private final Map<String, Double> sectionLast = new HashMap<String, Double>();                        // last loop
+    private String section;
+    private long sectionStartNs;
+    private long loops;
+    private double loopSum;
+
+    // battery health
+    private final BatteryHealth battery = new BatteryHealth();
+    private String batteryLabel = "";
+
     public static BlackBox create(String tag) { return new BlackBox(tag); }
 
     private BlackBox(String tag) { this.tag = tag; }
@@ -109,6 +122,42 @@ public class BlackBox implements Live {
         return this;
     }
 
+    private double resetByCodeAt = Double.NEGATIVE_INFINITY;
+
+    /** Call when your code resets encoders on purpose (e.g. homing a lift), so it is not reported as a hub reset. */
+    public void encodersReset() { resetByCodeAt = rec.isStarted() ? rec.time() : 0; rec.event("ENCODER_RESET", "by code"); }
+
+    /**
+     * A hub that reboots (static discharge, loose power, brownout) comes back with every encoder at 0. This fires
+     * when all encoders of one hub that were away from 0 read 0 in the same loop, unless encodersReset() was called
+     * within the last second.
+     */
+    public BlackBox hubResetRule(final String hub, final String... posSignals) {
+        final double[] prev = new double[posSignals.length];
+        java.util.Arrays.fill(prev, Double.NaN);
+        rule(hub + "-reset").severity(Rule.Severity.CRITICAL).cooldown(2).show(posSignals)
+                .when(new Rule.Condition() { public boolean test(Recorder r) {
+                    int away = 0, zeroed = 0;
+                    for (int i = 0; i < posSignals.length; i++) {
+                        double p = r.get(posSignals[i]);
+                        if (!Double.isNaN(prev[i]) && Math.abs(prev[i]) > 100) {
+                            away++;
+                            if (Math.abs(p) <= 3) zeroed++;
+                        }
+                        prev[i] = p;
+                    }
+                    return away > 0 && zeroed == away && r.time() - resetByCodeAt > 1.0;
+                }});
+        return this;
+    }
+
+    /** Hub that stopped answering (signal "<hub>.ok" is 0). */
+    public BlackBox hubLostRule(final String hub) {
+        rule(hub + "-not-responding").severity(Rule.Severity.CRITICAL).cooldown(2).show(hub + ".ok")
+                .when(new Rule.Condition() { public boolean test(Recorder r) { return r.get(hub + ".ok") == 0; } });
+        return this;
+    }
+
     /** Battery below volts (REV hubs reset around 7 V). */
     public BlackBox brownoutRule(final String batterySignal, final double volts) {
         rule("brownout").forTime(0.05).severity(Rule.Severity.CRITICAL).show(batterySignal)
@@ -147,6 +196,90 @@ public class BlackBox implements Live {
         return Double.NaN;   // not a health signal
     }
 
+    // ---------------------------------------------------------------- loop profiler
+
+    /**
+     * Sections to graph over time ("time.vision" etc. in the log). Sections you time but do not list here still
+     * appear in the report's loop breakdown. Call before start().
+     */
+    public BlackBox profile(String... sections) {
+        for (final String s : sections) {
+            sectionStats.put(s, new double[2]);
+            rec.signal("time." + s, new Recorder.Source() { public double get() {
+                Double v = sectionLast.get(s);
+                return v == null ? 0 : v;
+            }});
+        }
+        return this;
+    }
+
+    /**
+     * Start timing a part of the loop; the previous section ends here. update() ends the last one.
+     *   bb.section("vision"); vision.update();  bb.section("drive"); drive();  bb.update();
+     */
+    public void section(String name) {
+        long now = System.nanoTime();
+        closeSection(now);
+        section = name;
+        sectionStartNs = now;
+    }
+
+    private void closeSection(long now) {
+        if (section == null) return;
+        double ms = (now - sectionStartNs) / 1e6;
+        Double prev = sectionNow.get(section);
+        sectionNow.put(section, prev == null ? ms : prev + ms);
+        section = null;
+    }
+
+    private void endLoopSections() {
+        closeSection(System.nanoTime());
+        sectionLast.clear();
+        sectionLast.putAll(sectionNow);
+        for (Map.Entry<String, Double> e : sectionNow.entrySet()) {
+            double[] s = sectionStats.get(e.getKey());
+            if (s == null) sectionStats.put(e.getKey(), s = new double[2]);
+            s[0] += e.getValue();
+            s[1] = Math.max(s[1], e.getValue());
+        }
+        sectionNow.clear();
+    }
+
+    // ---------------------------------------------------------------- battery health
+
+    /** Which battery is in the robot (e.g. "A"): its health is tracked across sessions in batteries.csv. */
+    public BlackBox battery(String label) { batteryLabel = label == null ? "" : label.trim(); return this; }
+
+    /** Feed with a voltage and total current read at the same instant (FtcBlackBox does this for you). */
+    public BatteryHealth batteryHealth() { return battery; }
+
+    // ---------------------------------------------------------------- crash
+
+    /**
+     * Record an exception that is about to end the OpMode, with its stack trace and the last values of every
+     * signal, and write everything to disk now:
+     *   try { ...loop... } catch (RuntimeException e) { bb.crash(e); throw e; } finally { bb.stop(); }
+     */
+    public void crash(Throwable t) {
+        if (!rec.isStarted()) return;
+        java.io.StringWriter sw = new java.io.StringWriter();
+        t.printStackTrace(new java.io.PrintWriter(sw));
+        String first = t.toString();
+        StackTraceElement[] st = t.getStackTrace();
+        if (st.length > 0) first += " at " + st[0];
+        rec.event("CRASH", first);
+        synchronized (warnings) { warnings.addFirst(Recorder.fmt(rec.time()) + "s CRITICAL CRASH " + first); }
+        try {
+            FileWriter w = new FileWriter(new File(rec.dir(), rec.session() + ".crash.txt"));
+            w.write("time " + Recorder.fmt(rec.time()) + " s\n\n" + sw + "\nlast values:\n");
+            List<String> names = rec.names();
+            double[] v = rec.snapshot();
+            for (int i = 0; i < Math.min(names.size(), v.length); i++) w.write(names.get(i) + " = " + Recorder.fmt(v[i]) + "\n");
+            w.close();
+        } catch (Exception ignored) {}
+        rec.flush();
+    }
+
     // ---------------------------------------------------------------- loop
 
     public BlackBox start() {
@@ -163,6 +296,8 @@ public class BlackBox implements Live {
         long now = System.nanoTime();
         loopMs = (now - lastLoopNs) / 1e6;
         lastLoopNs = now;
+        endLoopSections();
+        countLoop();
         rec.update();
         checkRules(rec.time());
     }
@@ -171,9 +306,13 @@ public class BlackBox implements Live {
     public void update(double timeSeconds) {
         loopMs = Double.isNaN(lastSimT) ? 0 : (timeSeconds - lastSimT) * 1000;
         lastSimT = timeSeconds;
+        endLoopSections();
+        countLoop();
         rec.update(timeSeconds);
         checkRules(timeSeconds);
     }
+
+    private void countLoop() { if (rec.isStarted() && loopMs > 0) { loops++; loopSum += loopMs; } }
 
     private double lastSimT = Double.NaN;
 
@@ -224,6 +363,8 @@ public class BlackBox implements Live {
         report.clear();
         report.add("session " + rec.session() + ", " + rec.samples() + " samples" + (rec.dropped() > 0 ? ", dropped " + rec.dropped() : ""));
         for (Rule r : rules) if (r.count() > 0) report.add(r.severity() + " " + r.name() + " x" + r.count());
+        reportLoop();
+        reportBattery();
 
         // compare with previous sessions of the same tag: median of up to 10 older summaries
         // session = yyyyMMdd_HHmmss_<tag>: match the tag exactly, so "teleop" does not pick up "auto_teleop"
@@ -245,6 +386,66 @@ public class BlackBox implements Live {
             if (!n.equals("battery")) compare(n, "peak", rec.peakAbs(i), 1, old, floor);   // battery peak = full charge, says nothing
         }
         save();
+    }
+
+    /** "loop 24.1 ms avg: vision 14.2 ms (59%, max 31.0), drive 3.1 ms (13%), other 6.8 ms (28%)" */
+    private void reportLoop() {
+        if (loops == 0 || sectionStats.isEmpty()) return;
+        double avg = loopSum / loops, timed = 0;
+        StringBuilder s = new StringBuilder("loop " + Recorder.fmt(Math.round(avg * 10) / 10.0) + " ms avg:");
+        List<Map.Entry<String, double[]>> list = new ArrayList<Map.Entry<String, double[]>>(sectionStats.entrySet());
+        Collections.sort(list, new java.util.Comparator<Map.Entry<String, double[]>>() {
+            public int compare(Map.Entry<String, double[]> a, Map.Entry<String, double[]> b) { return Double.compare(b.getValue()[0], a.getValue()[0]); }
+        });
+        for (Map.Entry<String, double[]> e : list) {
+            double mean = e.getValue()[0] / loops;
+            timed += mean;
+            s.append(' ').append(e.getKey()).append(' ').append(Recorder.fmt(Math.round(mean * 10) / 10.0)).append(" ms (")
+             .append(Math.round(100 * mean / avg)).append("%, max ").append(Recorder.fmt(Math.round(e.getValue()[1] * 10) / 10.0)).append("),");
+        }
+        double other = Math.max(0, avg - timed);
+        s.append(" other ").append(Recorder.fmt(Math.round(other * 10) / 10.0)).append(" ms (").append(Math.round(100 * other / avg)).append("%)");
+        report.add(s.toString());
+    }
+
+    /** Battery health of this session, compared with the same battery's history in batteries.csv. */
+    private void reportBattery() throws Exception {
+        double r = battery.resistance();
+        if (Double.isNaN(r) && battery.samples() == 0) return;
+        String label = batteryLabel.isEmpty() ? "?" : batteryLabel;
+        StringBuilder s = new StringBuilder("battery " + label + ": " + (Double.isNaN(r) ? "-" : Recorder.fmt(Math.round(r * 1000) / 1000.0) + " ohm")
+                + " " + BatteryHealth.verdict(r) + ", start " + Recorder.fmt(Math.round(battery.startVolts() * 100) / 100.0)
+                + " V, min " + Recorder.fmt(Math.round(battery.minVolts() * 100) / 100.0) + " V, used "
+                + Recorder.fmt(Math.round(battery.ampHours() * 1000) / 1000.0) + " Ah");
+
+        File hist = new File(rec.dir(), "batteries.csv");
+        List<Double> past = new ArrayList<Double>();
+        if (hist.isFile() && !batteryLabel.isEmpty()) {
+            BufferedReader in = new BufferedReader(new FileReader(hist));
+            in.readLine();
+            for (String line; (line = in.readLine()) != null; ) {
+                String[] p = line.split(",", -1);
+                if (p.length >= 3 && p[1].equals(batteryLabel)) { double v = num(p[2]); if (!Double.isNaN(v)) past.add(v); }
+            }
+            in.close();
+        }
+        if (!past.isEmpty() && !Double.isNaN(r)) {
+            Collections.sort(past);
+            double med = past.get(past.size() / 2), change = (r - med) / med;
+            s.append("; usually ").append(Recorder.fmt(Math.round(med * 1000) / 1000.0)).append(" ohm (")
+             .append(change > 0 ? "+" : "").append(Math.round(change * 100)).append("%)");
+            if (change > 0.3) s.append(" WORSE THAN USUAL");
+        }
+        report.add(s.toString());
+        if (batteryLabel.isEmpty()) report.add("tip: bb.battery(\"A\") to track each battery's health over time");
+        else if (!Double.isNaN(r)) {
+            boolean header = !hist.isFile();
+            FileWriter w = new FileWriter(hist, true);
+            if (header) w.write("session,battery,ohm,start_v,min_v,ah\n");
+            w.write(rec.session() + "," + Recorder.safe(batteryLabel) + "," + Recorder.fmt(r) + "," + Recorder.fmt(battery.startVolts())
+                    + "," + Recorder.fmt(battery.minVolts()) + "," + Recorder.fmt(battery.ampHours()) + "\n");
+            w.close();
+        }
     }
 
     private void compare(String name, String what, double now, int col, List<Map<String, double[]>> old, double floor) {

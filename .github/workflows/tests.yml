@@ -15,6 +15,10 @@ jobs:
         run: |
           javac --release 8 -d out-dash src/org/asa/tools/core/*.java $(find test/fakes -name '*.java') test/DashboardTest.java
           java -cp out-dash DashboardTest
+      - name: Battery health, hub resets, loop profiler, crash capture, center of gravity
+        run: |
+          javac --release 8 -d out-feat src/org/asa/tools/core/*.java src/org/asa/tools/blackbox/*.java test/BlackBoxFeaturesTest.java
+          java -cp out-feat BlackBoxFeaturesTest
       - name: Monte Carlo - 300 random matches with injected stalls, lost encoders, brownouts, slow loops
         run: |
           javac --release 8 -d out-fuzz src/org/asa/tools/core/*.java src/org/asa/tools/blackbox/*.java test/BlackBoxFuzz.java

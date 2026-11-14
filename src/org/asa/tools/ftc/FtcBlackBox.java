@@ -12,8 +12,16 @@ import org.asa.tools.core.Dashboard;
 import org.asa.tools.core.Recorder;
 import org.firstinspires.ftc.robotcore.external.Telemetry;
 import org.firstinspires.ftc.robotcore.external.navigation.CurrentUnit;
+import org.firstinspires.ftc.robotcore.external.navigation.TempUnit;
+import org.firstinspires.ftc.robotcore.external.navigation.VoltageUnit;
 
+import com.qualcomm.robotcore.hardware.DcMotorController;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /** Black Box on an FTC robot: record the whole hardware map, show warnings on the Driver Hub. */
 public final class FtcBlackBox {
@@ -51,7 +59,56 @@ public final class FtcBlackBox {
             if (n != null && !bb.rec.has("servo." + n)) bb.signal("servo." + n, new Recorder.Source() { public double get() { return s.getPosition(); } });
         }
         bb.brownoutRule("battery", 8.0).slowLoopRule(50);
+        attachHubs(bb, hw);
         return bb;
+    }
+
+    /**
+     * Hub health: answering or not (a local flag, free), temperature (1 read/s), hub resets (all encoders of a hub
+     * back to 0 at once), and battery health from the total current and the Control Hub voltage read together
+     * every 150 ms (one read per hub plus one: ~2 ms each).
+     */
+    static void attachHubs(final BlackBox bb, HardwareMap hw) {
+        final List<LynxModule> hubs = hw.getAll(LynxModule.class);
+        if (hubs.isEmpty()) return;
+        LynxModule parent = hubs.get(0);
+        for (LynxModule h : hubs) if (h.isParent()) parent = h;
+        final LynxModule main = parent;
+
+        for (final LynxModule hub : hubs) {
+            String n = hubName(hw, hub);
+            if (bb.rec.has(n + ".ok")) continue;
+            bb.signal(n + ".ok", new Recorder.Source() { public double get() { return hub.isNotResponding() ? 0 : 1; } });
+            bb.signal(n + ".temp", new Recorder.Source() { public double get() { return hub.getTemperature(TempUnit.CELSIUS); } }, 1000);
+            bb.hubLostRule(n);
+        }
+
+        if (!bb.rec.has("battery.amps"))
+            bb.signal("battery.amps", new Recorder.Source() { public double get() {
+                double amps = 0;
+                for (LynxModule h : hubs) amps += h.getCurrent(CurrentUnit.AMPS);
+                double volts = main.getInputVoltage(VoltageUnit.VOLTS);       // right after: the same instant
+                bb.batteryHealth().feed(bb.rec.time(), volts, amps);
+                return amps;
+            }}, 150);
+
+        // group encoders by the hub that reads them: a hub reset zeroes all of its encoders at once
+        Map<DcMotorController, List<String>> byHub = new LinkedHashMap<DcMotorController, List<String>>();
+        Map<DcMotorController, String> firstMotor = new HashMap<DcMotorController, String>();
+        for (DcMotor m : hw.getAll(DcMotor.class)) {
+            String n = name(hw, m);
+            if (n == null || !bb.rec.has(n + ".pos")) continue;
+            DcMotorController c = m.getController();
+            if (!byHub.containsKey(c)) { byHub.put(c, new ArrayList<String>()); firstMotor.put(c, n); }
+            if (!byHub.get(c).contains(n + ".pos")) byHub.get(c).add(n + ".pos");
+        }
+        for (Map.Entry<DcMotorController, List<String>> e : byHub.entrySet())
+            bb.hubResetRule("hub-of-" + firstMotor.get(e.getKey()), e.getValue().toArray(new String[0]));
+    }
+
+    private static String hubName(HardwareMap hw, LynxModule hub) {
+        String n = name(hw, hub);
+        return Recorder.safe(n == null ? "hub" + hub.getModuleAddress() : n);
     }
 
     public static BlackBox attachAll(BlackBox bb, HardwareMap hw) { return attachAll(bb, hw, 5.0); }
