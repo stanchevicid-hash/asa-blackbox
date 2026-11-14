@@ -40,6 +40,8 @@ public class AsaHealthCheck extends LinearOpMode {
         File labelFile = new File(dir, "battery-label.txt");
         int label = indexOf(read(labelFile));
         List<LynxModule> hubs = hardwareMap.getAll(LynxModule.class);
+        java.util.Map<LynxModule, String> firmware = new java.util.HashMap<LynxModule, String>();    // read once: a command to the hub
+        for (LynxModule h : hubs) { String v; try { v = h.getFirmwareVersionString(); } catch (Exception e) { v = "?"; } firmware.put(h, v); }
         List<DcMotorEx> motors = new ArrayList<DcMotorEx>();
         List<String> names = new ArrayList<String>();
         for (DcMotor m : hardwareMap.getAll(DcMotor.class))
@@ -103,6 +105,7 @@ public class AsaHealthCheck extends LinearOpMode {
                     String hn = hardwareMap.getNamesOf(h).isEmpty() ? "hub" : hardwareMap.getNamesOf(h).iterator().next();
                     telemetry.addLine(String.format("%s: %s, %.0f C, %.2f V", hn, h.isNotResponding() ? "NOT RESPONDING" : "ok",
                             h.getTemperature(TempUnit.CELSIUS), h.getInputVoltage(VoltageUnit.VOLTS)));
+                    telemetry.addLine("  firmware " + firmware.get(h) + " (update with REV Hardware Client if older than your team's other hubs)");
                 }
                 if (done) {
                     telemetry.addLine("Report:");

@@ -100,13 +100,18 @@ public class BlackBox implements Live {
             // 0.5 s: a normal spin-up also draws stall-like current for 0.1-0.3 s. A stall is a command held in one
             // direction: a reversal restarts the count, so back-to-back reversal spikes (whose short dip between them
             // can fall between two 100 ms current reads) never add up to a stall.
-            final double[] lastSign = {0};
+            // A motor without an encoder always reads 0 speed, so a long spin-up looks like a stall: it needs 1 s.
+            final double[] lastSign = {0}, since = {Double.NaN};
             rule(m + "-stall").forTime(0.5).show(m + ".amps", m + ".vel", m + ".power")
                     .when(new Rule.Condition() { public boolean test(Recorder r) {
                         double p = r.get(m + ".power"), sign = Math.signum(p);
                         boolean reversed = sign != 0 && lastSign[0] != 0 && sign != lastSign[0];
                         if (sign != 0) lastSign[0] = sign;
-                        return !reversed && r.get(m + ".amps") > stallAmps && Math.abs(r.get(m + ".vel")) < minVel && Math.abs(p) > 0.5;
+                        boolean c = !reversed && r.get(m + ".amps") > stallAmps && Math.abs(r.get(m + ".vel")) < minVel && Math.abs(p) > 0.5;
+                        if (!c) { since[0] = Double.NaN; return false; }
+                        if (moved[0]) return true;
+                        if (Double.isNaN(since[0])) since[0] = r.time();
+                        return r.time() - since[0] >= 0.5;                  // + forTime 0.5 = 1 s without an encoder
                     }});
         }
         rule(m + "-encoder-lost").forTime(0.5).severity(Rule.Severity.CRITICAL).show(m + ".power", m + ".vel")
@@ -169,6 +174,120 @@ public class BlackBox implements Live {
     public BlackBox slowLoopRule(final double ms) {
         rule("slow-loop").forTime(1.0).show("loop_ms")
                 .when(new Rule.Condition() { public boolean test(Recorder r) { return r.get("loop_ms") > ms; } });
+        return this;
+    }
+
+    /**
+     * One loop longer than ms (a freeze the driver feels: a blocking sleep, a camera call, garbage collection).
+     * The slow-loop rule needs a whole second; this catches a single spike.
+     */
+    public BlackBox pauseRule(final double ms) {
+        rule("loop-pause").cooldown(1).show("loop_ms")
+                .when(new Rule.Condition() { public boolean test(Recorder r) { return r.time() > 0.5 && r.get("loop_ms") > ms; } });
+        return this;
+    }
+
+    /**
+     * A sensor whose value has not changed by a single bit for `seconds` while the robot moves (any of
+     * motionSignals, motor powers, above 0.3): a hung I2C sensor returns the same cached value forever.
+     * A real sensor always has some noise. NaN readings (e.g. out of range) never count as frozen, and a sensor that
+     * never changed at all (not initialized, unplugged from the start) is not "frozen": it must have been alive first.
+     */
+    public BlackBox frozenRule(final String signal, double seconds, final String... motionSignals) {
+        final double[] last = {Double.NaN};
+        final boolean[] alive = {false};
+        rule(signal + "-frozen").forTime(seconds).cooldown(10).show(signal)
+                .when(new Rule.Condition() { public boolean test(Recorder r) {
+                    double v = r.get(signal);
+                    boolean same = !Double.isNaN(v) && v == last[0];
+                    if (!Double.isNaN(v) && !Double.isNaN(last[0]) && v != last[0]) alive[0] = true;
+                    last[0] = v;
+                    if (!alive[0]) return false;
+                    boolean moving = false;
+                    for (String m : motionSignals) if (Math.abs(r.get(m)) > 0.3) moving = true;
+                    return same && moving;
+                }});
+        return this;
+    }
+
+    /**
+     * Drivetrain friction: all wheels are commanded about the same power (within 0.15) above 0.3, but one draws more
+     * than twice the median current of the others, and over 1.5 A, for 2 s. Usually a bent axle, a rubbing wheel, a
+     * dragging chain or a failing gearbox; it slows the robot and drains the battery long before it breaks.
+     */
+    public BlackBox imbalanceRule(final String... motors) {
+        if (motors.length < 2) return this;
+        for (final String m : motors) {
+            if (!rec.has(m + ".amps")) return this;
+            final boolean[] encoderWorks = {false};
+            rule(m + "-drags").forTime(2.0).cooldown(30).show(m + ".amps", m + ".power")
+                    .when(new Rule.Condition() { public boolean test(Recorder r) {
+                        if (Math.abs(r.get(m + ".vel")) > 20) encoderWorks[0] = true;   // every loop, before any filter
+                        double pMin = Double.MAX_VALUE, pMax = 0;
+                        List<Double> others = new ArrayList<Double>(), speeds = new ArrayList<Double>();
+                        for (String o : motors) {
+                            double p = Math.abs(r.get(o + ".power"));
+                            pMin = Math.min(pMin, p); pMax = Math.max(pMax, p);
+                            if (!o.equals(m)) { others.add(r.get(o + ".amps")); speeds.add(Math.abs(r.get(o + ".vel"))); }
+                        }
+                        if (pMin < 0.3 || pMax - pMin > 0.15) return false;
+                        // friction = the wheel turns with the others but needs more current; a wheel that does not
+                        // turn is a stall (other rule). Encoders read 0 when not plugged in, so speed is only compared
+                        // with the other wheels that do report one; with no encoders at all only the current is used.
+                        double vel = Math.abs(r.get(m + ".vel")), vMax = 0;
+                        if (encoderWorks[0] && vel == 0) return false;        // its own working encoder: not turning
+                        for (double s : speeds) if (s > vMax) vMax = s;
+                        if (vMax > 0 && !(vel >= 0.5 * vMax)) return false;
+                        Collections.sort(others);
+                        double med = others.get(others.size() / 2), a = r.get(m + ".amps");
+                        return a > 1.5 && a > 2 * med;
+                    }});
+        }
+        return this;
+    }
+
+    /**
+     * Motor overheating: the RMS current over the last ~tauSeconds (a first-order thermal model, I^2 filtered)
+     * above ampsRms. A motor run like this loses power and can burn out. 5 A RMS over 2 minutes is a lot for an FTC
+     * motor; a stall that the stall rule catches is short, this catches a long overload (a lift held up at high power).
+     */
+    public BlackBox thermalRule(final String m, final double ampsRms, final double tauSeconds) {
+        final double[] heat = {0, Double.NaN};                    // filtered I^2, last time
+        rule(m + "-hot").cooldown(30).show(m + ".amps")
+                .when(new Rule.Condition() { public boolean test(Recorder r) {
+                    double t = r.time(), a = r.get(m + ".amps");
+                    if (!Double.isNaN(heat[1]) && !Double.isNaN(a)) {
+                        double dt = Math.min(1.0, t - heat[1]);
+                        heat[0] += (a * a - heat[0]) * dt / tauSeconds;
+                    }
+                    heat[1] = t;
+                    return Math.sqrt(heat[0]) > ampsRms;
+                }});
+        return this;
+    }
+
+    /** Something that was connected (okSignal 1) is now 0: a gamepad, a sensor, a camera. Fires each time it drops. */
+    public BlackBox disconnectRule(String name, final String okSignal) {
+        final boolean[] was = {false};
+        rule(name + "-disconnected").severity(Rule.Severity.CRITICAL).cooldown(1).show(okSignal)
+                .when(new Rule.Condition() { public boolean test(Recorder r) {
+                    double ok = r.get(okSignal);
+                    if (ok == 1) was[0] = true;
+                    return was[0] && ok == 0;
+                }});
+        return this;
+    }
+
+    /**
+     * Battery voltage read while the robot is idle (during INIT; under load even a full battery sags, and an autonomous
+     * drives from the first second) below threshold: it will sag toward brownout in the match. Reported at the first
+     * update(). FtcBlackBox.attachAll does this with 12.4 V.
+     */
+    public BlackBox lowBatteryAtStartRule(final double idleVolts, final double threshold) {
+        final double v = idleVolts;
+        if (!rec.has("battery.init")) rec.signal("battery.init", new Recorder.Source() { public double get() { return v; } }, 60000);
+        rule("battery-low-at-start").cooldown(1e9).show("battery.init")
+                .when(new Rule.Condition() { public boolean test(Recorder r) { return v > 5 && v < threshold; } });
         return this;
     }
 

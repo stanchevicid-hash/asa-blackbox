@@ -28,7 +28,8 @@ public class ExampleTeleOpBlackBox extends LinearOpMode {
         lift.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
 
         BlackBox bb = BlackBox.create("teleop");
-        FtcBlackBox.attachAll(bb, hardwareMap);                  // every motor, servo, battery + standard rules
+        FtcBlackBox.attachAll(bb, hardwareMap);                  // every motor, servo, sensor, battery + standard rules
+        FtcBlackBox.attachGamepads(bb, gamepad1, gamepad2);       // driver input on the timeline + disconnect warning
         bb.channel("lift").signal("target", () -> target).signal("inches", () -> liftInches);
         bb.notReachingRule("lift-slow", "lift.target", "lift.inches", 1.0, 1.5);
         AsaWeb.start();                                           // http://192.168.43.1:8099/

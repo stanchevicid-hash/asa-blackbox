@@ -44,9 +44,11 @@ public class BlackBoxFuzz {
                 m.maxTicks = 1000 + rnd.nextDouble() * 2000;
                 bb.channel(m.name).signal("power", () -> m.power).signal("pos", () -> m.pos)
                         .signal("vel", () -> m.encoder ? m.vel : 0).signal("amps", () -> m.amps, 100);
-                bb.motorRules(m.name, 5.0, 20);                      // FtcBlackBox.attachAll defaults
+                bb.motorRules(m.name, 5.0, 20).thermalRule(m.name, 5.0, 120);   // FtcBlackBox.attachAll defaults
             }
-            bb.brownoutRule("battery", 8.0).slowLoopRule(50);
+            // the v1.4 detectors ride along on healthy matches: they must stay silent (judged as false alarms below)
+            if (nm >= 4) bb.imbalanceRule("m0", "m1", "m2", "m3");
+            bb.brownoutRule("battery", 8.0).slowLoopRule(50).pauseRule(150).lowBatteryAtStartRule(12.6 + (match % 7) * 0.1, 12.4);
             bb.start();
 
             // faults: 0-3 per match, at random times and motors, never overlapping on one motor
@@ -56,7 +58,8 @@ public class BlackBoxFuzz {
                 int type = rnd.nextInt(4);
                 double from = 20 + rnd.nextDouble() * 110;
                 Motor m = ms[rnd.nextInt(nm)];
-                if (type == 0) faults.add(new Fault(m.name + "-stall", from, from + 0.6 + rnd.nextDouble() * 1.5));
+                // detection limit: 0.5 s with an encoder, 1 s without (its speed always reads 0, like a stall)
+                if (type == 0) faults.add(new Fault(m.name + "-stall", from, from + (m.encoder ? 0.6 : 1.2) + rnd.nextDouble() * 1.5));
                 else if (type == 1) {
                     Motor e = null;
                     for (Motor x : ms) if (x.encoder) e = x;

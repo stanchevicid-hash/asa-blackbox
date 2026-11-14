@@ -3,7 +3,12 @@ package org.asa.tools.ftc;
 import com.qualcomm.hardware.lynx.LynxModule;
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DcMotorEx;
+import com.qualcomm.robotcore.hardware.AnalogInput;
+import com.qualcomm.robotcore.hardware.DistanceSensor;
+import com.qualcomm.robotcore.hardware.Gamepad;
 import com.qualcomm.robotcore.hardware.HardwareDevice;
+import com.qualcomm.robotcore.hardware.IMU;
+import com.qualcomm.robotcore.hardware.TouchSensor;
 import com.qualcomm.robotcore.hardware.HardwareMap;
 import com.qualcomm.robotcore.hardware.Servo;
 
@@ -11,7 +16,9 @@ import org.asa.tools.blackbox.BlackBox;
 import org.asa.tools.core.Dashboard;
 import org.asa.tools.core.Recorder;
 import org.firstinspires.ftc.robotcore.external.Telemetry;
+import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
 import org.firstinspires.ftc.robotcore.external.navigation.CurrentUnit;
+import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
 import org.firstinspires.ftc.robotcore.external.navigation.TempUnit;
 import org.firstinspires.ftc.robotcore.external.navigation.VoltageUnit;
 
@@ -29,8 +36,10 @@ public final class FtcBlackBox {
     private FtcBlackBox() {}
 
     /**
-     * Records every motor (power, position, velocity, current) and servo position in the hardware map,
-     * the battery, and adds standard rules: stall, encoder lost, brownout, slow loop.
+     * Records every motor (power, position, velocity, current), servo position, IMU, distance sensor, analog input
+     * and touch sensor in the hardware map, the battery and the hubs, and adds the standard rules: stall, encoder
+     * lost, motor overheating, drivetrain wheel dragging, brownout, low battery at start, slow loop, loop pause,
+     * frozen sensor, hub reset, hub not responding.
      * Turns on AUTO bulk caching on hubs where it is OFF, so encoder reads cost one bulk read per loop.
      * Motor current is not in the bulk read (~2 ms each), so it is sampled every 100 ms.
      *
@@ -58,8 +67,78 @@ public final class FtcBlackBox {
             String n = name(hw, s);
             if (n != null && !bb.rec.has("servo." + n)) bb.signal("servo." + n, new Recorder.Source() { public double get() { return s.getPosition(); } });
         }
-        bb.brownoutRule("battery", 8.0).slowLoopRule(50);
+        List<String> powers = new ArrayList<String>(), drive = new ArrayList<String>();
+        for (String n : bb.rec.names()) if (n.endsWith(".power")) powers.add(n);
+        for (String n : powers) {
+            String m = n.substring(0, n.length() - 6);
+            if (bb.rec.has(m + ".amps")) bb.thermalRule(m, 5.0, 120);
+            if (isDriveMotor(m)) drive.add(m);
+        }
+        if (drive.size() == 2 || drive.size() == 4) bb.imbalanceRule(drive.toArray(new String[0]));
+        bb.brownoutRule("battery", 8.0).lowBatteryAtStartRule(idleBattery(hw), 12.4)   // INIT: robot idle
+          .slowLoopRule(50).pauseRule(150);
+        attachSensors(bb, hw, powers.toArray(new String[0]));
         attachHubs(bb, hw);
+        return bb;
+    }
+
+    private static double idleBattery(HardwareMap hw) { try { return Ftc.battery(hw).get(); } catch (Exception e) { return Double.NaN; } }
+
+    /** "frontLeft", "left_front_drive", "lf", "FL motor", "backRight"...: a drivetrain wheel by its name. */
+    public static boolean isDriveMotor(String name) {
+        String n = name.toLowerCase(java.util.Locale.US).replaceAll("motor|drive|wheel|[^a-z]", "");
+        if ((n.contains("left") || n.contains("right")) && (n.contains("front") || n.contains("back") || n.contains("rear"))) return true;
+        return n.matches("[lr][fbr]|[fbr][lr]") || n.equals("left") || n.equals("right");
+    }
+
+    /**
+     * IMU heading, distance sensors, analog inputs and touch sensors. A hung IMU keeps returning its last heading:
+     * the frozen rule reports it if the heading stops changing (not even noise) while the motors are driven.
+     */
+    static void attachSensors(BlackBox bb, HardwareMap hw, String[] motorPowers) {
+        for (final IMU imu : hw.getAll(IMU.class)) {
+            String n = name(hw, imu);
+            if (n == null || bb.rec.has(n + ".yaw")) continue;
+            bb.signal(n + ".yaw", new Recorder.Source() { public double get() { return imu.getRobotYawPitchRollAngles().getYaw(AngleUnit.DEGREES); } }, 100);
+            bb.frozenRule(n + ".yaw", 5.0, motorPowers);       // 5 s: a robot pinned against a wall can hold a heading for a moment
+        }
+        for (final DistanceSensor d : hw.getAll(DistanceSensor.class)) {
+            String n = name(hw, d);
+            if (n == null || bb.rec.has(n + ".mm")) continue;
+            bb.signal(n + ".mm", new Recorder.Source() { public double get() {
+                double mm = d.getDistance(DistanceUnit.MM);
+                return mm > 0 && mm < 2000 ? mm : Double.NaN;           // out of range: not a reading
+            }}, 200);
+            // ponytail: no frozen rule here; a 1 mm-resolution sensor watching a part inside the robot legitimately
+            // reads the same value while driving. Add bb.frozenRule(n + ".mm", ...) yourself for one aimed at the field.
+        }
+        for (final AnalogInput a : hw.getAll(AnalogInput.class)) {
+            String n = name(hw, a);
+            if (n != null && !bb.rec.has(n + ".volts")) bb.signal(n + ".volts", new Recorder.Source() { public double get() { return a.getVoltage(); } }, 100);
+        }
+        for (final TouchSensor t : hw.getAll(TouchSensor.class)) {
+            String n = name(hw, t);
+            if (n != null && !bb.rec.has(n + ".pressed")) bb.signal(n + ".pressed", new Recorder.Source() { public double get() { return t.isPressed() ? 1 : 0; } });
+        }
+    }
+
+    /**
+     * The drivers' sticks and triggers on the same timeline as the robot (was it the driver or the robot?), and a
+     * CRITICAL warning when the Driver Station drops a gamepad. Call with the OpMode's gamepad1, gamepad2 before start().
+     */
+    public static BlackBox attachGamepads(BlackBox bb, Gamepad... pads) {
+        for (int i = 0; i < pads.length; i++) {
+            final Gamepad g = pads[i];
+            String p = "gamepad" + (i + 1);
+            if (g == null || bb.rec.has(p + ".ok")) continue;
+            bb.signal(p + ".ok", new Recorder.Source() { public double get() { return g.id != Gamepad.ID_UNASSOCIATED ? 1 : 0; } });
+            bb.signal(p + ".ly", new Recorder.Source() { public double get() { return g.left_stick_y; } });
+            bb.signal(p + ".lx", new Recorder.Source() { public double get() { return g.left_stick_x; } });
+            bb.signal(p + ".rx", new Recorder.Source() { public double get() { return g.right_stick_x; } });
+            bb.signal(p + ".lt", new Recorder.Source() { public double get() { return g.left_trigger; } });
+            bb.signal(p + ".rt", new Recorder.Source() { public double get() { return g.right_trigger; } });
+            bb.disconnectRule(p, p + ".ok");
+        }
         return bb;
     }
 

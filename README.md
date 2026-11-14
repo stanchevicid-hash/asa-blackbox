@@ -9,17 +9,25 @@ worse from session to session.
 
 Made by **ASA, FTC team 28284**. MIT license, free for every team.
 
+**Полная инструкция на русском: [GUIDE.ru.md](GUIDE.ru.md)** (установка, запуск, все предупреждения, как это работает).
+
 ## What you get
 
 - **Whole robot in one line**: `FtcBlackBox.attachAll` records power, position, velocity and current for every
-  motor, every servo position and the battery, plus the loop time.
+  motor, every servo position, the IMU heading, distance sensors, analog inputs, touch sensors, the hubs and the
+  battery, plus the loop time. `FtcBlackBox.attachGamepads(bb, gamepad1, gamepad2)` adds the drivers' sticks.
 - **Your own signals and events**: targets, states, `SCORE_ATTEMPT`, `INTAKE_JAM`, all on one timeline.
 - **Automatic diagnostics** (standard rules added for you):
-  - **stall**: high current, no motion, real command
+  - **stall**: high current, no motion, real command (0.5 s; 1 s for a motor without an encoder)
   - **encoder lost**: an encoder that used to move reads 0 while the motor is driven
     (motors without an encoder never trigger it)
   - **brownout**: battery below 8 V
-  - **slow loop**: over 50 ms for a second
+  - **slow loop**: over 50 ms for a second; **loop pause**: a single loop over 150 ms
+  - **motor overheating**: RMS current over ~2 minutes above 5 A
+  - **drivetrain wheel dragging**: one wheel turning with the others at the same power but drawing 2x their current
+    for 2 s (a bent axle, a rubbing wheel, a tight chain). Wheels are found by name (`frontLeft`, `lf`, ...)
+  - **frozen IMU**: heading identical to the last bit for 5 s while the motors are driven (a hung I2C bus)
+  - **gamepad disconnected** and **low battery at INIT** (below 12.4 V with the robot idle)
   - write your own: `bb.rule("intake-jam").when(...).forTime(0.25)`
 - **Baseline**: each session's motor currents, battery and loop time are compared with the median of the
   previous sessions, e.g. `lift.amps peak 5.2 vs 3.4 (+53%)`. It catches a mechanism wearing out before it fails.
@@ -126,13 +134,17 @@ realistic healthy driving: spin-up current spikes, reversals, a lift holding at 
 still, idle motors, battery sag, and 8-25 ms loop jitter. It injects random faults: stalls, lost encoders,
 brownouts and slow loops.
 
-| 3000 matches | Result |
-|---|---|
-| Injected faults | **3364 of 3365 reported** by the right rule (the miss: a 0.7 s stall, at the detection limit) |
-| False alarms | **0** |
+The v1.4 detectors (overheating, wheel dragging, loop pause, low battery at start) run in every match too and must
+stay silent, since those matches are healthy for them.
 
-A stall is reported after 0.5 s of high current with no motion, in one direction. Stalls shorter than ~0.7 s may
-not be reported (the current is read every ~100 ms).
+| 9000 matches (3 seeds) | Result |
+|---|---|
+| Injected faults | **10163 of 10165 reported** by the right rule (the 2 misses: 0.6 s stalls, at the detection limit) |
+| False alarms | **0** (including the new detectors) |
+
+A stall is reported after 0.5 s of high current with no motion, in one direction (1 s for a motor without an
+encoder, whose speed always reads 0). Stalls close to that limit may not be reported (the current is read every
+~100 ms). `test/BlackBoxDetectorsTest.java` checks each new detector against its fault and a healthy look-alike.
 
 `test/SoakTest.java` writes 10 simulated minutes (60000 rows × 40 signals) at 10× real speed: no row is dropped,
 memory stays flat, every row is intact, and the whole session exports to WPILOG. Both run in CI on every push.
