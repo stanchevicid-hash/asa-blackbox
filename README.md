@@ -10,6 +10,7 @@ worse from session to session.
 Made by **ASA, FTC team 28284**. MIT license, free for every team.
 
 **Полная инструкция на русском: [GUIDE.ru.md](GUIDE.ru.md)** (установка, запуск, все предупреждения, как это работает).
+**Ghid complet în română: [GUIDE.ro.md](GUIDE.ro.md)** (instalare, rulare, toate butoanele și avertismentele, cum funcționează).
 
 ## What you get
 
