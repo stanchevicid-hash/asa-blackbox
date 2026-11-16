@@ -269,7 +269,9 @@ public class BlackBox implements Live {
     /** Something that was connected (okSignal 1) is now 0: a gamepad, a sensor, a camera. Fires each time it drops. */
     public BlackBox disconnectRule(String name, final String okSignal) {
         final boolean[] was = {false};
-        rule(name + "-disconnected").severity(Rule.Severity.CRITICAL).cooldown(1).show(okSignal)
+        // 0.25 s: when the driver presses STOP, the Driver Station releases the gamepads a few ms before the OpMode
+        // ends, which looks like a disconnect in the very last loop (seen on a real robot). A real drop lasts longer.
+        rule(name + "-disconnected").severity(Rule.Severity.CRITICAL).forTime(0.25).cooldown(1).show(okSignal)
                 .when(new Rule.Condition() { public boolean test(Recorder r) {
                     double ok = r.get(okSignal);
                     if (ok == 1) was[0] = true;
@@ -573,7 +575,8 @@ public class BlackBox implements Live {
         if (vals.size() < 1 || Double.isNaN(now)) return;
         Collections.sort(vals);
         double med = vals.get(vals.size() / 2);
-        if (Math.abs(med) < 1e-3 || Math.abs(now - med) < floor) return;
+        // a median below the floor means the signal was unused before (motor never run): nothing to compare with
+        if (Math.abs(med) < Math.max(1e-3, floor) || Math.abs(now - med) < floor) return;
         double change = (now - med) / Math.abs(med);
         // ponytail: fixed 30% threshold; make per-signal if some signals are naturally noisy
         if (Math.abs(change) >= 0.30)

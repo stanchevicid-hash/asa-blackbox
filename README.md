@@ -9,6 +9,8 @@ worse from session to session.
 
 Made by **ASA, FTC team 28284**. MIT license, free for every team.
 
+**Follow ASA:** [Instagram](https://www.instagram.com/asa.ftc_md/) · [TikTok](https://www.tiktok.com/@ftc.team.asa) · ⭐ star this repo if it helps · [send feedback](https://github.com/stanchevicid-hash/asa-blackbox/issues/new?template=robot-result.yml): what worked, what did not, what to add. Every message makes the next version better.
+
 **Полная инструкция на русском: [GUIDE.ru.md](GUIDE.ru.md)** (установка, запуск, все предупреждения, как это работает).
 **Ghid complet în română: [GUIDE.ro.md](GUIDE.ro.md)** (instalare, rulare, toate butoanele și avertismentele, cum funcționează).
 
@@ -50,6 +52,19 @@ Made by **ASA, FTC team 28284**. MIT license, free for every team.
   (`loop 24 ms: vision 14 ms (59%), drive 3 ms …`).
 - **Crash capture**: `bb.crash(e)` saves the error, its stack trace and the last value of every signal.
 
+## Where to see the results
+
+While a Black Box program runs, the Driver Hub shows the line
+`Results: connect a phone/laptop to the robot Wi-Fi, open http://192.168.43.1:8099/`.
+Do exactly that (the phone has no internet while it is on the robot Wi-Fi). Pick a session: the page says in plain
+words what is fine and what to check, with what to do about it. The graphs are underneath, for a detailed look.
+English by default, Romanian and Russian one click away.
+
+![Black Box results page](docs/results-page.jpg)
+
+*A real 4-minute drive of our robot: one wheel draws 33% more current than the others (it turned out to be tighter),
+and no encoder cable was plugged in.*
+
 ## Ready-made programs on the Driver Hub
 
 These two appear in the Driver Hub's OpMode list as soon as the library is installed. No code to write.
@@ -65,7 +80,11 @@ These two appear in the Driver Hub's OpMode list as soon as the library is insta
 [latest release](https://github.com/stanchevicid-hash/asa-blackbox/releases/latest) and unzip it at the root of your
 FtcRobotController project. The files land in `TeamCode/src/main/java/org/asa/tools/`. Or copy `src/org` there yourself.
 
-**OnBot Java:** create the folders `org/asa/tools/core`, `org/asa/tools/ftc` and `org/asa/tools/blackbox`, then upload
+**OnBot Java (easiest):** download `asa-blackbox-onbot.zip` from the same release, unzip it, and upload all 14 files
+into your usual `teamcode` folder in OnBot Java (no subfolders). Press Build. If the first build fails with
+"bad source file", press Build again: OnBot Java sometimes needs a second build after new files arrive.
+
+**OnBot Java, keeping the packages:** create the folders `org/asa/tools/core`, `org/asa/tools/ftc` and `org/asa/tools/blackbox`, then upload
 the `.java` files from the matching folders in `src/`. The library itself uses plain Java 7 syntax; only the examples use lambdas.
 
 No Gradle changes and no other dependencies. It works with FTC SDK 9.x through 12.x.
@@ -176,3 +195,7 @@ java -cp out BlackBoxSelfTest
 
 Shares its core (`Recorder`, `Ftc`, `AsaWeb`) with [asa-sysid](https://github.com/stanchevicid-hash/asa-sysid). Use both: SysId tells
 you how the robot *should* behave, and Black Box shows how it *does*.
+
+---
+
+**Follow ASA:** [Instagram](https://www.instagram.com/asa.ftc_md/) · [TikTok](https://www.tiktok.com/@ftc.team.asa) · ⭐ star this repo if it helps · [send feedback](https://github.com/stanchevicid-hash/asa-blackbox/issues/new?template=robot-result.yml): what worked, what did not, what to add. Every message makes the next version better.

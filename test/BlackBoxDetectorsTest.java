@@ -135,11 +135,14 @@ public class BlackBoxDetectorsTest {
         v[0] = 1; v[1] = 0;                                      // gamepad 2 never connected (one-driver team)
         for (int i = 0; i < 100; i++) bb.update(t += 0.02);
         v[0] = 0;
-        for (int i = 0; i < 10; i++) bb.update(t += 0.02);
+        for (int i = 0; i < 30; i++) bb.update(t += 0.02);   // 0.6 s without the gamepad
         v[0] = 1;
         for (int i = 0; i < 100; i++) bb.update(t += 0.02);
-        check(count(bb, "gamepad1-disconnected") == 1, "gamepad 1 dropped once: reported once");
+        check(count(bb, "gamepad1-disconnected") == 1, "gamepad 1 dropped for 0.6 s: reported once");
         check(count(bb, "gamepad2-disconnected") == 0, "gamepad 2 never connected: not reported");
+        v[0] = 0;                                             // STOP pressed: released in the last loops only
+        for (int i = 0; i < 3; i++) bb.update(t += 0.004);
+        check(count(bb, "gamepad1-disconnected") == 1, "gamepads released by STOP in the last loops: not reported");
         bb.stop();
     }
 

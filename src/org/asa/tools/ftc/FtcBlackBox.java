@@ -197,10 +197,18 @@ public final class FtcBlackBox {
         List<String> w = bb.warnings();
         String err = bb.rec.writeError();
         if (err != null) t.addLine("BlackBox NOT SAVING: " + err);
-        t.addData("BlackBox", "%d warnings  loop %.1f ms%s", w.size(), bb.loopMs(), AsaWeb.url().isEmpty() ? "" : "  " + AsaWeb.url());
+        t.addData("BlackBox", "%d warnings  loop %.1f ms", w.size(), bb.loopMs());
         for (int i = 0; i < Math.min(3, w.size()); i++) t.addLine(w.get(i));
+        String howTo = resultsHint();
+        if (!howTo.isEmpty()) t.addLine(howTo);
         // live graphs in FTC Dashboard too, if the team has it (no-op otherwise)
         Dashboard.send(bb.names(), bb.values(), w.size() > 3 ? w.subList(0, 3) : w, 50);
+    }
+
+    /** One line telling the driver where the results are, or "" when the web page is not running. */
+    public static String resultsHint() {
+        String url = AsaWeb.url();
+        return url.isEmpty() ? "" : "Results: connect a phone/laptop to the robot Wi-Fi, open " + url;
     }
 
     private static String name(HardwareMap hw, Object device) {

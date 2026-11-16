@@ -32,7 +32,7 @@ import java.util.Map;
 public class AsaHealthCheck extends LinearOpMode {
 
     static final String[] LABELS = {"-", "A", "B", "C", "D", "E", "F", "G", "H"};
-    private final boolean[] last = new boolean[5];
+    private final boolean[] last = new boolean[6];
 
     @Override
     public void runOpMode() {
@@ -46,6 +46,12 @@ public class AsaHealthCheck extends LinearOpMode {
         List<String> names = new ArrayList<String>();
         for (DcMotor m : hardwareMap.getAll(DcMotor.class))
             if (m instanceof DcMotorEx) { motors.add((DcMotorEx) m); names.add(hardwareMap.getNamesOf(m).iterator().next()); }
+        // Raw power, no built-in PID: a motor left in RUN_TO_POSITION by an earlier OpMode would hold still and look like
+        // a dead encoder. RUN_WITHOUT_ENCODER still counts ticks, it only stops the hub from steering the motor.
+        for (DcMotorEx m : motors) {
+            m.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
+            m.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
+        }
 
         while (!isStarted() && !isStopRequested()) {
             if (edge(0, gamepad1.dpad_right)) label = (label + 1) % LABELS.length;
@@ -60,21 +66,20 @@ public class AsaHealthCheck extends LinearOpMode {
         }
         write(labelFile, LABELS[label]);
 
-        BlackBox bb = BlackBox.create("healthcheck");
-        if (label > 0) bb.battery(LABELS[label]);
-        FtcBlackBox.attachAll(bb, hardwareMap);
+        BlackBox bb = session(label);
         AsaWeb.start();
         AsaWeb.publish(bb);
-        bb.start();
 
         Map<String, String> verdict = new LinkedHashMap<String, String>();
         int sel = 0, startTicks = 0;
         double pulsePower = 0, maxVel = 0, maxAmps = 0;
         boolean done = false;
+        int auto = -1;                                                    // automatic test: index of the motor, -1 = off
+        double autoT0 = -1;
         List<String> report = new ArrayList<String>();
         try {
             while (opModeIsActive()) {
-                if (!done && !motors.isEmpty()) {
+                if (!done && !motors.isEmpty() && auto < 0) {
                     if (edge(2, gamepad1.dpad_down) && pulsePower == 0) sel = (sel + 1) % motors.size();
                     if (edge(3, gamepad1.dpad_up) && pulsePower == 0) sel = (sel + motors.size() - 1) % motors.size();
                     DcMotorEx m = motors.get(sel);
@@ -87,17 +92,48 @@ public class AsaHealthCheck extends LinearOpMode {
                     }
                     if (want == 0 && pulsePower != 0) {                  // released: judge the motor
                         m.setPower(0);
-                        int moved = m.getCurrentPosition() - startTicks;
-                        String enc = Math.abs(moved) < 5 ? "encoder: no counts (none, unplugged, or jammed)"
-                                : "encoder OK, " + (Math.signum(moved) == Math.signum(pulsePower) ? "+power counts up" : "+power counts DOWN");
-                        verdict.put(names.get(sel), String.format("%s; max %.0f ticks/s, %.1f A", enc, maxVel, maxAmps));
+                        verdict.put(names.get(sel), judge(m.getCurrentPosition() - startTicks, pulsePower, maxVel, maxAmps));
                     }
                     pulsePower = want;
+                    // Y: every motor in turn by itself, then the report
+                    if (edge(5, gamepad1.y) && pulsePower == 0) { auto = 0; autoT0 = -1; }
+                }
+                if (auto >= 0 && !done) {
+                    DcMotorEx m = motors.get(auto);
+                    sel = auto;
+                    double t = getRuntime();
+                    if (gamepad1.b) {                                    // B stops the automatic test at once
+                        for (DcMotorEx mm : motors) mm.setPower(0);
+                        auto = -1;
+                    } else if (autoT0 < 0) {
+                        autoT0 = t; startTicks = m.getCurrentPosition(); maxVel = 0; maxAmps = 0;
+                        m.setPower(AUTO_POWER);
+                    } else if (t - autoT0 < AUTO_SECONDS) {
+                        if (t - autoT0 > 0.3) {                          // skip the spin-up spike
+                            maxVel = Math.max(maxVel, Math.abs(m.getVelocity()));
+                            maxAmps = Math.max(maxAmps, m.getCurrent(CurrentUnit.AMPS));
+                        }
+                    } else {
+                        m.setPower(0);
+                        verdict.put(names.get(auto), judge(m.getCurrentPosition() - startTicks, AUTO_POWER, maxVel, maxAmps));
+                        autoT0 = -1;
+                        auto++;
+                        if (auto >= motors.size()) {                     // all done: report
+                            auto = -1;
+                            report = bb.stop();
+                            done = true;
+                        } else sleep(300);                               // let it stop before the next one
+                    }
                 }
                 if (edge(4, gamepad1.x) && !done) {
                     for (DcMotorEx mm : motors) mm.setPower(0);
                     report = bb.stop();
                     done = true;
+                }
+                else if (edge(5, gamepad1.y) && done) {                     // back to testing, results kept
+                    bb = session(label);
+                    AsaWeb.publish(bb);
+                    done = false;
                 }
                 if (!done) bb.update();
 
@@ -107,6 +143,10 @@ public class AsaHealthCheck extends LinearOpMode {
                             h.getTemperature(TempUnit.CELSIUS), h.getInputVoltage(VoltageUnit.VOLTS)));
                     telemetry.addLine("  firmware " + firmware.get(h) + " (update with REV Hardware Client if older than your team's other hubs)");
                 }
+                telemetry.addLine(done ? "Y = test again"
+                        : auto >= 0 ? "AUTOMATIC TEST " + (auto + 1) + "/" + motors.size() + " | B = STOP"
+                        : "Y = test ALL motors by itself | or: dpad up/down = motor, hold A / B = turn it | X = report");
+                telemetry.addLine(FtcBlackBox.resultsHint());
                 if (done) {
                     telemetry.addLine("Report:");
                     for (String l : report) telemetry.addLine(l);
@@ -124,6 +164,25 @@ public class AsaHealthCheck extends LinearOpMode {
             bb.stop();
             AsaWeb.publish(null);
         }
+    }
+
+    static final double AUTO_POWER = 0.3, AUTO_SECONDS = 1.5;
+
+    /** What a short run of one motor says about it. */
+    static String judge(int moved, double power, double maxVel, double maxAmps) {
+        if (maxAmps < 0.2) return "NO CURRENT: power cable unplugged, in another port, or broken wire";
+        if (Math.abs(moved) < 5)
+            return String.format("%.1f A, encoder: no counts (wheel turned? encoder cable unplugged or in another port; wheel still? jammed)", maxAmps);
+        return String.format("OK %.1f A, encoder %s, max %.0f ticks/s", maxAmps,
+                Math.signum(moved) == Math.signum(power) ? "counts up" : "counts DOWN (reversed)", maxVel);
+    }
+
+    private BlackBox session(int label) {
+        BlackBox bb = BlackBox.create("healthcheck");
+        if (label > 0) bb.battery(LABELS[label]);
+        FtcBlackBox.attachAll(bb, hardwareMap);
+        bb.start();
+        return bb;
     }
 
     /** Last health of each battery from batteries.csv, worst first. */
