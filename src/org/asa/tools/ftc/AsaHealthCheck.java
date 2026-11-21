@@ -2,13 +2,13 @@ package org.asa.tools.ftc;
 
 import com.qualcomm.hardware.lynx.LynxModule;
 import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
-import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DcMotorEx;
+import com.qualcomm.robotcore.hardware.Gamepad;
 
-import org.asa.tools.blackbox.BatteryHealth;
 import org.asa.tools.blackbox.BlackBox;
 import org.asa.tools.core.Recorder;
+import org.firstinspires.ftc.robotcore.external.Telemetry;
 import org.firstinspires.ftc.robotcore.external.navigation.CurrentUnit;
 import org.firstinspires.ftc.robotcore.external.navigation.TempUnit;
 import org.firstinspires.ftc.robotcore.external.navigation.VoltageUnit;
@@ -16,59 +16,73 @@ import org.firstinspires.ftc.robotcore.external.navigation.VoltageUnit;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileReader;
-import java.io.FileWriter;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 /**
- * Whole-robot check from the Driver Hub, no code needed. Hubs (answering, temperature), the battery (now, and each
- * battery's health from past sessions), and every motor: a motor only turns while you hold A (+) or B (-), at 0.3.
+ * "Health check" mode of the ASA Black Box program. Hubs (answering, temperature, firmware), the battery (now, and each
+ * battery's health from past sessions), and every motor: a motor only turns while you hold A (+) or B (-), at 0.3,
+ * or one after another by itself with Y.
  *
- * INIT: dpad left/right = which battery is in (A..H). START: dpad up/down = motor, hold A/B = turn it, X = finish.
+ * INIT: dpad left/right = which battery is in (A..H). START: Y = all motors by itself, or dpad up/down = motor,
+ * hold A/B = turn it; X = finish and show the report.
  */
-@TeleOp(name = "ASA Health Check", group = "ASA")
-public class AsaHealthCheck extends LinearOpMode {
+final class AsaHealthCheck {
+
+    /** Driver Hub colors and helpers (see AsaBlackBoxOpMode). */
+    private static final class H extends AsaBlackBoxOpMode.Html {}
 
     static final String[] LABELS = {"-", "A", "B", "C", "D", "E", "F", "G", "H"};
-    private final boolean[] last = new boolean[6];
+    static final double AUTO_POWER = 0.3, AUTO_SECONDS = 1.5;
 
-    @Override
-    public void runOpMode() {
-        File dir = Recorder.defaultDir();
-        File labelFile = new File(dir, "battery-label.txt");
-        int label = indexOf(read(labelFile));
-        List<LynxModule> hubs = hardwareMap.getAll(LynxModule.class);
-        java.util.Map<LynxModule, String> firmware = new java.util.HashMap<LynxModule, String>();    // read once: a command to the hub
-        for (LynxModule h : hubs) { String v; try { v = h.getFirmwareVersionString(); } catch (Exception e) { v = "?"; } firmware.put(h, v); }
-        List<DcMotorEx> motors = new ArrayList<DcMotorEx>();
-        List<String> names = new ArrayList<String>();
-        for (DcMotor m : hardwareMap.getAll(DcMotor.class))
-            if (m instanceof DcMotorEx) { motors.add((DcMotorEx) m); names.add(hardwareMap.getNamesOf(m).iterator().next()); }
+    private final LinearOpMode op;
+    private final boolean[] last = new boolean[6];
+    private final File dir = Recorder.defaultDir(), labelFile = new File(dir, "battery-label.txt");
+    private int label;
+    private final List<LynxModule> hubs;
+    private final Map<LynxModule, String> firmware = new HashMap<LynxModule, String>();
+    private final List<DcMotorEx> motors = new ArrayList<DcMotorEx>();
+    private final List<String> names = new ArrayList<String>();
+
+    AsaHealthCheck(LinearOpMode op) {
+        this.op = op;
+        label = indexOf(AsaBlackBoxOpMode.read(labelFile));
+        hubs = op.hardwareMap.getAll(LynxModule.class);
+        for (LynxModule h : hubs) { String v; try { v = h.getFirmwareVersionString(); } catch (Exception e) { v = "?"; } firmware.put(h, v); }   // read once: a command to the hub
+        for (DcMotor m : op.hardwareMap.getAll(DcMotor.class))
+            if (m instanceof DcMotorEx) { motors.add((DcMotorEx) m); names.add(op.hardwareMap.getNamesOf(m).iterator().next()); }
+    }
+
+    /** One pass of the INIT screen. */
+    void initLoop() {
+        Telemetry t = op.telemetry;
+        if (edge(0, op.gamepad1.dpad_right)) label = (label + 1) % LABELS.length;
+        if (edge(1, op.gamepad1.dpad_left)) label = (label + LABELS.length - 1) % LABELS.length;
+        t.addLine(H.dim(tr("Battery in the robot (dpad ◀ ▶): ", "Батарея в роботе (dpad ◀ ▶): ", "Bateria din robot (dpad ◀ ▶): "))
+                + "<b>" + H.esc(LABELS[label]) + "</b>");
+        t.addLine(H.dim(tr("Hubs: ", "Хабов: ", "Huburi: ")) + hubs.size() + H.gap() + H.dim(tr("Motors: ", "Моторов: ", "Motoare: ")) + motors.size());
+        for (String l : batteryHistory(dir)) t.addLine(l);
+        t.addLine("");
+        t.addLine(H.dim(tr("START, then Y = test every motor by itself", "START, потом Y = проверить все моторы автоматически",
+                "START, apoi Y = testează singur toate motoarele")));
+        t.addLine(H.c(H.YELLOW, tr("Lift the robot or clear space: the motors will turn.", "Поднимите робота или освободите место: моторы будут крутиться.",
+                "Ridicați robotul sau faceți loc: motoarele se vor învârti.")));
+    }
+
+    void run() {
+        AsaBlackBoxOpMode.write(labelFile, LABELS[label]);
         // Raw power, no built-in PID: a motor left in RUN_TO_POSITION by an earlier OpMode would hold still and look like
         // a dead encoder. RUN_WITHOUT_ENCODER still counts ticks, it only stops the hub from steering the motor.
         for (DcMotorEx m : motors) {
             m.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
             m.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
         }
-
-        while (!isStarted() && !isStopRequested()) {
-            if (edge(0, gamepad1.dpad_right)) label = (label + 1) % LABELS.length;
-            if (edge(1, gamepad1.dpad_left)) label = (label + LABELS.length - 1) % LABELS.length;
-            telemetry.addLine("ASA Health Check");
-            telemetry.addData("battery in the robot (dpad left/right)", LABELS[label]);
-            telemetry.addData("hubs / motors", "%d / %d", hubs.size(), motors.size());
-            for (String l : batteryHistory(dir)) telemetry.addLine(l);
-            telemetry.addLine("START, then dpad up/down = motor, hold A/B = turn it, X = finish");
-            telemetry.update();
-            idle();
-        }
-        write(labelFile, LABELS[label]);
-
-        BlackBox bb = session(label);
-        AsaWeb.start();
-        AsaWeb.publish(bb);
+        Telemetry telemetry = op.telemetry;
+        Gamepad gamepad1 = op.gamepad1;
+        BlackBox bb = session();
 
         Map<String, String> verdict = new LinkedHashMap<String, String>();
         int sel = 0, startTicks = 0;
@@ -78,7 +92,7 @@ public class AsaHealthCheck extends LinearOpMode {
         double autoT0 = -1;
         List<String> report = new ArrayList<String>();
         try {
-            while (opModeIsActive()) {
+            while (op.opModeIsActive()) {
                 if (!done && !motors.isEmpty() && auto < 0) {
                     if (edge(2, gamepad1.dpad_down) && pulsePower == 0) sel = (sel + 1) % motors.size();
                     if (edge(3, gamepad1.dpad_up) && pulsePower == 0) sel = (sel + motors.size() - 1) % motors.size();
@@ -101,7 +115,7 @@ public class AsaHealthCheck extends LinearOpMode {
                 if (auto >= 0 && !done) {
                     DcMotorEx m = motors.get(auto);
                     sel = auto;
-                    double t = getRuntime();
+                    double t = op.getRuntime();
                     if (gamepad1.b) {                                    // B stops the automatic test at once
                         for (DcMotorEx mm : motors) mm.setPower(0);
                         auto = -1;
@@ -122,7 +136,7 @@ public class AsaHealthCheck extends LinearOpMode {
                             auto = -1;
                             report = bb.stop();
                             done = true;
-                        } else sleep(300);                               // let it stop before the next one
+                        } else op.sleep(300);                            // let it stop before the next one
                     }
                 }
                 if (edge(4, gamepad1.x) && !done) {
@@ -130,57 +144,74 @@ public class AsaHealthCheck extends LinearOpMode {
                     report = bb.stop();
                     done = true;
                 }
-                else if (edge(5, gamepad1.y) && done) {                     // back to testing, results kept
-                    bb = session(label);
-                    AsaWeb.publish(bb);
+                else if (edge(5, gamepad1.y) && done) {                     // test again: the automatic test, results kept
+                    bb = session();
                     done = false;
+                    auto = 0;
+                    autoT0 = -1;
                 }
                 if (!done) bb.update();
 
                 for (LynxModule h : hubs) {
-                    String hn = hardwareMap.getNamesOf(h).isEmpty() ? "hub" : hardwareMap.getNamesOf(h).iterator().next();
-                    telemetry.addLine(String.format("%s: %s, %.0f C, %.2f V", hn, h.isNotResponding() ? "NOT RESPONDING" : "ok",
-                            h.getTemperature(TempUnit.CELSIUS), h.getInputVoltage(VoltageUnit.VOLTS)));
-                    telemetry.addLine("  firmware " + firmware.get(h) + " (update with REV Hardware Client if older than your team's other hubs)");
+                    String hn = op.hardwareMap.getNamesOf(h).isEmpty() ? "hub" : op.hardwareMap.getNamesOf(h).iterator().next();
+                    boolean lost = h.isNotResponding();
+                    double temp = h.getTemperature(TempUnit.CELSIUS), volts = h.getInputVoltage(VoltageUnit.VOLTS);
+                    telemetry.addLine(H.lv(lost ? 'r' : temp > 60 || volts < 12 ? 'y' : 'g', String.format("%s: %s, %.0f °C, %.2f V", hn,
+                            lost ? tr("NOT RESPONDING", "НЕ ОТВЕЧАЕТ", "NU RĂSPUNDE") : "ok", temp, volts))
+                            + H.dim("   firmware " + firmware.get(h)));
                 }
-                telemetry.addLine(done ? "Y = test again"
-                        : auto >= 0 ? "AUTOMATIC TEST " + (auto + 1) + "/" + motors.size() + " | B = STOP"
-                        : "Y = test ALL motors by itself | or: dpad up/down = motor, hold A / B = turn it | X = report");
-                telemetry.addLine(FtcBlackBox.resultsHint());
+                telemetry.addLine("");
                 if (done) {
-                    telemetry.addLine("Report:");
-                    for (String l : report) telemetry.addLine(l);
-                } else if (!motors.isEmpty()) {
-                    DcMotorEx m = motors.get(sel);
-                    telemetry.addLine("> " + names.get(sel) + (pulsePower != 0 ? "  TURNING" : "") + "  (" + (sel + 1) + "/" + motors.size() + ")");
-                    telemetry.addData("ticks / vel / amps", "%d  %.0f  %.1f", m.getCurrentPosition(), m.getVelocity(), m.getCurrent(CurrentUnit.AMPS));
+                    telemetry.addLine(H.title(tr("Report", "Отчёт", "Raport")) + H.gap() + H.dim(tr("Y = test again", "Y = проверить ещё раз", "Y = testează din nou")));
+                } else if (auto >= 0) {
+                    telemetry.addLine(H.title(tr("Automatic test ", "Автопроверка ", "Test automat ") + (auto + 1) + " / " + motors.size())
+                            + H.gap() + "<b>" + H.c(H.RED, "B = STOP") + "</b>");
+                } else {
+                    telemetry.addLine(H.dim(tr("Y = test ALL motors by itself", "Y = проверить ВСЕ моторы автоматически", "Y = testează singur TOATE motoarele")));
+                    telemetry.addLine(H.dim(tr("or dpad ▲ ▼ = motor, hold A / B = turn it, X = report", "или dpad ▲ ▼ = мотор, держать A / B = крутить, X = отчёт",
+                            "sau dpad ▲ ▼ = motor, țineți A / B = îl rotește, X = raport")));
                 }
-                for (Map.Entry<String, String> e : verdict.entrySet()) telemetry.addLine(e.getKey() + ": " + e.getValue());
-                for (String w : bb.warnings()) telemetry.addLine(w);
+                if (!done && !motors.isEmpty()) {
+                    DcMotorEx m = motors.get(sel);
+                    telemetry.addLine(H.pick(names.get(sel) + "  (" + (sel + 1) + "/" + motors.size() + ")")
+                            + (pulsePower != 0 || auto >= 0 ? "  " + H.c(H.YELLOW, tr("turning", "крутится", "se rotește")) : ""));
+                    telemetry.addLine(H.dim(String.format("ticks %d   vel %.0f   %.1f A", m.getCurrentPosition(), m.getVelocity(), m.getCurrent(CurrentUnit.AMPS))));
+                }
+                for (Map.Entry<String, String> e : verdict.entrySet())
+                    telemetry.addLine(H.lv(e.getValue().charAt(0), e.getKey() + ": " + e.getValue().substring(1)));
+                for (String w : bb.warnings()) telemetry.addLine(H.lv(w.contains("CRITICAL") ? 'r' : 'y', w));
+                if (done) for (String l : report) telemetry.addLine(H.dim(l));
+                telemetry.addLine("");
+                telemetry.addLine(H.dim(FtcBlackBox.resultsHint()));
                 telemetry.update();
             }
         } finally {
             for (DcMotorEx mm : motors) mm.setPower(0);
             bb.stop();
-            AsaWeb.publish(null);
         }
     }
 
-    static final double AUTO_POWER = 0.3, AUTO_SECONDS = 1.5;
-
-    /** What a short run of one motor says about it. */
+    /** What a short run of one motor says about it; the first character is its traffic light (g, y, r). */
     static String judge(int moved, double power, double maxVel, double maxAmps) {
-        if (maxAmps < 0.2) return "NO CURRENT: power cable unplugged, in another port, or broken wire";
+        if (maxAmps < 0.2) return "r" + tr("NO CURRENT: power cable unplugged, in another port, or broken wire",
+                "НЕТ ТОКА: кабель питания не подключён, в другом порту или оборван",
+                "FĂRĂ CURENT: cablul de alimentare e scos, în alt port sau rupt");
         if (Math.abs(moved) < 5)
-            return String.format("%.1f A, encoder: no counts (wheel turned? encoder cable unplugged or in another port; wheel still? jammed)", maxAmps);
-        return String.format("OK %.1f A, encoder %s, max %.0f ticks/s", maxAmps,
-                Math.signum(moved) == Math.signum(power) ? "counts up" : "counts DOWN (reversed)", maxVel);
+            return "y" + String.format("%.1f A, ", maxAmps) + tr("encoder: no counts (wheel turned? encoder cable unplugged or in another port; wheel still? jammed)",
+                    "энкодер не считает (колесо крутилось? кабель энкодера не подключён или в другом порту; стояло? заклинило)",
+                    "encoderul nu numără (roata s-a rotit? cablul encoderului e scos sau în alt port; a stat? e blocată)");
+        boolean up = Math.signum(moved) == Math.signum(power);
+        return (up ? "g" : "y") + String.format("OK %.1f A, ", maxAmps)
+                + (up ? tr("encoder counts up", "энкодер считает вверх", "encoderul numără în sus")
+                      : tr("encoder counts DOWN (reversed: setDirection or swap the encoder cable)", "энкодер считает ВНИЗ (наоборот: setDirection или поменяйте кабель энкодера)",
+                           "encoderul numără în JOS (invers: setDirection sau inversați cablul encoderului)"))
+                + String.format(", max %.0f ticks/s", maxVel);
     }
 
-    private BlackBox session(int label) {
+    private BlackBox session() {
         BlackBox bb = BlackBox.create("healthcheck");
         if (label > 0) bb.battery(LABELS[label]);
-        FtcBlackBox.attachAll(bb, hardwareMap);
+        FtcBlackBox.attachAll(bb, op.hardwareMap);   // also starts the results page and shows this session live
         bb.start();
         return bb;
     }
@@ -201,23 +232,21 @@ public class AsaHealthCheck extends LinearOpMode {
         for (Map.Entry<String, String> e : lastLine.entrySet()) {
             double ohm;
             try { ohm = Double.parseDouble(e.getValue()); } catch (Exception x) { continue; }
-            out.add(String.format("battery %s: %.3f ohm, %s", e.getKey(), ohm, BatteryHealth.verdict(ohm)));
+            String v = Double.isNaN(ohm) ? tr("not enough data (drive more)", "мало данных (поездите ещё)", "prea puține date (mai conduceți)")
+                    : ohm < 0.15 ? tr("good", "хорошая", "bună")
+                    : ohm < 0.25 ? tr("watch it", "следите за ней", "urmăriți-o")
+                    : tr("weak: check connectors, then replace", "слабая: проверьте разъёмы, потом замените", "slabă: verificați conectorii, apoi înlocuiți-o");
+            out.add(H.lv(Double.isNaN(ohm) ? 'n' : ohm < 0.15 ? 'g' : ohm < 0.25 ? 'y' : 'r',
+                    String.format(tr("battery %s: %.3f ohm, %s", "батарея %s: %.3f Ом, %s", "bateria %s: %.3f ohm, %s"), e.getKey(), ohm, v)));
         }
         return out;
     }
 
+    private static String tr(String en, String ru, String ro) { return AsaBlackBoxOpMode.tr(en, ru, ro); }
+
     private static int indexOf(String s) {
         for (int i = 0; i < LABELS.length; i++) if (LABELS[i].equals(s)) return i;
         return 0;
-    }
-
-    private static String read(File f) {
-        try { BufferedReader r = new BufferedReader(new FileReader(f)); String s = r.readLine(); r.close(); return s == null ? "" : s.trim(); }
-        catch (Exception e) { return ""; }
-    }
-
-    private static void write(File f, String s) {
-        try { f.getParentFile().mkdirs(); FileWriter w = new FileWriter(f); w.write(s + "\n"); w.close(); } catch (Exception ignored) {}
     }
 
     private boolean edge(int i, boolean now) {

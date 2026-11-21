@@ -30,6 +30,7 @@ public class BlackBoxFeaturesTest {
         hubReset();
         profilerAndCrash();
         centerOfGravity();
+        sameSecond();
         System.out.println(failures == 0 ? "\nALL PASSED" : "\n" + failures + " FAILED");
         System.exit(failures == 0 ? 0 : 1);
     }
@@ -145,5 +146,18 @@ public class BlackBoxFeaturesTest {
         for (String line; (line = r.readLine()) != null; ) s.append(line).append('\n');
         r.close();
         return s.toString();
+    }
+
+    /** The automatic recorder can start the same OpMode twice in one second (INIT, STOP, INIT): two files, not one. */
+    static void sameSecond() throws Exception {
+        System.out.println("SAME TAG, SAME SECOND");
+        java.io.File dir = java.nio.file.Files.createTempDirectory("asa-same").toFile();
+        org.asa.tools.core.Recorder a = new org.asa.tools.core.Recorder(), b = new org.asa.tools.core.Recorder();
+        a.signal("x", new org.asa.tools.core.Recorder.Source() { public double get() { return 1; } });
+        b.signal("x", new org.asa.tools.core.Recorder.Source() { public double get() { return 2; } });
+        a.start(dir, "TeleOp Main"); a.update(); a.stop();
+        b.start(dir, "TeleOp Main"); b.update(); b.stop();
+        check(!a.session().equals(b.session()), "second session gets its own name: " + a.session() + " / " + b.session());
+        check(new java.io.File(dir, a.session() + ".csv").exists() && new java.io.File(dir, b.session() + ".csv").exists(), "both files kept");
     }
 }

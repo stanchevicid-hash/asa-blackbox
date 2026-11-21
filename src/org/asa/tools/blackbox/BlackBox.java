@@ -138,9 +138,21 @@ public class BlackBox implements Live {
      * within the last second.
      */
     public BlackBox hubResetRule(final String hub, final String... posSignals) {
+        return zeroedRule(hub + "-reset", Rule.Severity.CRITICAL, posSignals);
+    }
+
+    /**
+     * The same check when recording without the team's code (automatic recorder): all encoders of a hub back to 0
+     * is either the program resetting them or the hub rebooting, so it is a WARNING named "-zeroed".
+     */
+    public BlackBox hubZeroedRule(final String hub, final String... posSignals) {
+        return zeroedRule(hub + "-zeroed", Rule.Severity.WARNING, posSignals);
+    }
+
+    private BlackBox zeroedRule(String name, Rule.Severity severity, final String... posSignals) {
         final double[] prev = new double[posSignals.length];
         java.util.Arrays.fill(prev, Double.NaN);
-        rule(hub + "-reset").severity(Rule.Severity.CRITICAL).cooldown(2).show(posSignals)
+        rule(name).severity(severity).cooldown(2).show(posSignals)
                 .when(new Rule.Condition() { public boolean test(Recorder r) {
                     int away = 0, zeroed = 0;
                     for (int i = 0; i < posSignals.length; i++) {

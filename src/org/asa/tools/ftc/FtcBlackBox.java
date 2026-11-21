@@ -3,6 +3,7 @@ package org.asa.tools.ftc;
 import com.qualcomm.hardware.lynx.LynxModule;
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DcMotorEx;
+import com.qualcomm.robotcore.hardware.DcMotorSimple;
 import com.qualcomm.robotcore.hardware.AnalogInput;
 import com.qualcomm.robotcore.hardware.DistanceSensor;
 import com.qualcomm.robotcore.hardware.Gamepad;
@@ -46,20 +47,80 @@ public final class FtcBlackBox {
      * @param stallAmps current above which a motor that does not move counts as stalled (5 A suits most FTC motors)
      */
     public static BlackBox attachAll(BlackBox bb, HardwareMap hw, double stallAmps) {
-        for (LynxModule hub : hw.getAll(LynxModule.class))
+        manualAttachNs = System.nanoTime();   // this OpMode records by itself: the automatic recorder steps aside
+        attach(bb, hw, stallAmps, null);
+        return bb;
+    }
+
+    /** Last time a team's own code called attachAll (the automatic recorder then stops its copy). */
+    static volatile long manualAttachNs = Long.MIN_VALUE;
+
+    /**
+     * Encoders for the automatic recorder, which samples from its own thread while the team's code drives: one bulk
+     * read per hub per sample, whatever caching mode the team uses (by default it is OFF, and then every encoder read
+     * would be its own command on the hub's bus).
+     */
+    static final class Bulk {
+        final List<LynxModule> hubs;
+        volatile LynxModule.BulkData[] data;
+        /**
+         * False until 1 s after START. The team's INIT often initializes the IMU (a BHI260 receives its firmware
+         * then) and I2C sensors: reading them from another thread at that moment could disturb it.
+         */
+        volatile boolean armed;
+        Bulk(List<LynxModule> hubs) { this.hubs = hubs; data = new LynxModule.BulkData[hubs.size()]; }
+        void refresh() {
+            LynxModule.BulkData[] d = new LynxModule.BulkData[hubs.size()];
+            for (int i = 0; i < d.length; i++) { try { d[i] = hubs.get(i).getBulkData(); } catch (Exception e) { d[i] = null; } }
+            data = d;
+        }
+        int hubOf(DcMotor m) {
+            try {
+                Object c = m.getController();
+                if (c instanceof com.qualcomm.hardware.lynx.LynxController) {
+                    Object sn = ((com.qualcomm.hardware.lynx.LynxController) c).getSerialNumber();
+                    for (int i = 0; i < hubs.size(); i++) if (hubs.get(i).getSerialNumber().equals(sn)) return i;
+                }
+            } catch (Exception ignored) {}
+            return -1;
+        }
+    }
+
+    /** Same recording for the automatic recorder: nothing changed on the team's hubs, fewer reads, no loop-time rules. */
+    static Bulk attachBackground(BlackBox bb, HardwareMap hw) {
+        Bulk bulk = new Bulk(hw.getAll(LynxModule.class));
+        attach(bb, hw, 5.0, bulk);
+        return bulk;
+    }
+
+    private static void attach(BlackBox bb, HardwareMap hw, double stallAmps, final Bulk bulk) {
+        final boolean bg = bulk != null;
+        // the team's own code may rely on its caching mode: only the 4-line integration switches it on
+        if (!bg) for (LynxModule hub : hw.getAll(LynxModule.class))
             if (hub.getBulkCachingMode() == LynxModule.BulkCachingMode.OFF) hub.setBulkCachingMode(LynxModule.BulkCachingMode.AUTO);
 
-        bb.signal("battery", Ftc.battery(hw), 100);
+        bb.signal("battery", Ftc.battery(hw), bg ? 250 : 100);
         for (final DcMotor m : hw.getAll(DcMotor.class)) {
             String n = name(hw, m);
             if (n == null || bb.rec.has(n + ".power")) continue;
             BlackBox.Channel c = bb.channel(n);
             c.signal("power", new Recorder.Source() { public double get() { return m.getPower(); } });
-            c.signal("pos", new Recorder.Source() { public double get() { return m.getCurrentPosition(); } });
+            final int hub = bg ? bulk.hubOf(m) : -1, port = m.getPortNumber();
+            if (hub >= 0) {   // raw bulk values carry no direction: apply it like getCurrentPosition() does
+                c.signal("pos", new Recorder.Source() { public double get() { LynxModule.BulkData d = bulk.data[hub];
+                    return d == null ? Double.NaN : sign(m) * d.getMotorCurrentPosition(port); } });
+                c.signal("vel", new Recorder.Source() { public double get() { LynxModule.BulkData d = bulk.data[hub];
+                    return d == null ? Double.NaN : sign(m) * d.getMotorVelocity(port); } });
+            } else {
+                c.signal("pos", new Recorder.Source() { public double get() { return m.getCurrentPosition(); } }, bg ? 100 : 0);
+                if (m instanceof DcMotorEx) {
+                    final DcMotorEx e = (DcMotorEx) m;
+                    c.signal("vel", new Recorder.Source() { public double get() { return e.getVelocity(); } }, bg ? 100 : 0);
+                }
+            }
             if (m instanceof DcMotorEx) {
                 final DcMotorEx e = (DcMotorEx) m;
-                c.signal("vel", new Recorder.Source() { public double get() { return e.getVelocity(); } });
-                c.signal("amps", new Recorder.Source() { public double get() { return e.getCurrent(CurrentUnit.AMPS); } }, 100);
+                c.signal("amps", new Recorder.Source() { public double get() { return e.getCurrent(CurrentUnit.AMPS); } }, bg ? 400 : 100);
                 bb.motorRules(n, stallAmps, 20);
             }
         }
@@ -75,12 +136,17 @@ public final class FtcBlackBox {
             if (isDriveMotor(m)) drive.add(m);
         }
         if (drive.size() == 2 || drive.size() == 4) bb.imbalanceRule(drive.toArray(new String[0]));
-        bb.brownoutRule("battery", 8.0).lowBatteryAtStartRule(idleBattery(hw), 12.4)   // INIT: robot idle
-          .slowLoopRule(50).pauseRule(150);
-        attachSensors(bb, hw, powers.toArray(new String[0]));
-        attachHubs(bb, hw);
-        return bb;
+        bb.brownoutRule("battery", 8.0).lowBatteryAtStartRule(idleBattery(hw), 12.4);   // INIT: robot idle
+        // loop time is the team's loop only when their code calls update(); the recorder's own thread says nothing about it
+        if (!bg) bb.slowLoopRule(50).pauseRule(150);
+        attachSensors(bb, hw, powers.toArray(new String[0]), bulk);
+        attachHubs(bb, hw, bg);
+        // the results page starts by itself and shows this session live (it goes back to "Sessions" after stop())
+        AsaWeb.start();
+        AsaWeb.publish(bb);
     }
+
+    private static int sign(DcMotor m) { return m.getDirection() == DcMotorSimple.Direction.REVERSE ? -1 : 1; }
 
     private static double idleBattery(HardwareMap hw) { try { return Ftc.battery(hw).get(); } catch (Exception e) { return Double.NaN; } }
 
@@ -95,30 +161,34 @@ public final class FtcBlackBox {
      * IMU heading, distance sensors, analog inputs and touch sensors. A hung IMU keeps returning its last heading:
      * the frozen rule reports it if the heading stops changing (not even noise) while the motors are driven.
      */
-    static void attachSensors(BlackBox bb, HardwareMap hw, String[] motorPowers) {
+    static void attachSensors(BlackBox bb, HardwareMap hw, String[] motorPowers, final Bulk bulk) {
+        boolean bg = bulk != null;
+        int slow = bg ? 250 : 100;   // the automatic recorder shares the I2C bus with the team's code: read less often
         for (final IMU imu : hw.getAll(IMU.class)) {
             String n = name(hw, imu);
             if (n == null || bb.rec.has(n + ".yaw")) continue;
-            bb.signal(n + ".yaw", new Recorder.Source() { public double get() { return imu.getRobotYawPitchRollAngles().getYaw(AngleUnit.DEGREES); } }, 100);
+            bb.signal(n + ".yaw", new Recorder.Source() { public double get() { if (bulk != null && !bulk.armed) return Double.NaN;
+                return imu.getRobotYawPitchRollAngles().getYaw(AngleUnit.DEGREES); } }, slow);
             bb.frozenRule(n + ".yaw", 5.0, motorPowers);       // 5 s: a robot pinned against a wall can hold a heading for a moment
         }
         for (final DistanceSensor d : hw.getAll(DistanceSensor.class)) {
             String n = name(hw, d);
             if (n == null || bb.rec.has(n + ".mm")) continue;
             bb.signal(n + ".mm", new Recorder.Source() { public double get() {
+                if (bulk != null && !bulk.armed) return Double.NaN;
                 double mm = d.getDistance(DistanceUnit.MM);
                 return mm > 0 && mm < 2000 ? mm : Double.NaN;           // out of range: not a reading
-            }}, 200);
+            }}, bg ? 500 : 200);
             // ponytail: no frozen rule here; a 1 mm-resolution sensor watching a part inside the robot legitimately
             // reads the same value while driving. Add bb.frozenRule(n + ".mm", ...) yourself for one aimed at the field.
         }
         for (final AnalogInput a : hw.getAll(AnalogInput.class)) {
             String n = name(hw, a);
-            if (n != null && !bb.rec.has(n + ".volts")) bb.signal(n + ".volts", new Recorder.Source() { public double get() { return a.getVoltage(); } }, 100);
+            if (n != null && !bb.rec.has(n + ".volts")) bb.signal(n + ".volts", new Recorder.Source() { public double get() { return a.getVoltage(); } }, slow);
         }
         for (final TouchSensor t : hw.getAll(TouchSensor.class)) {
             String n = name(hw, t);
-            if (n != null && !bb.rec.has(n + ".pressed")) bb.signal(n + ".pressed", new Recorder.Source() { public double get() { return t.isPressed() ? 1 : 0; } });
+            if (n != null && !bb.rec.has(n + ".pressed")) bb.signal(n + ".pressed", new Recorder.Source() { public double get() { return t.isPressed() ? 1 : 0; } }, bg ? slow : 0);
         }
     }
 
@@ -147,7 +217,7 @@ public final class FtcBlackBox {
      * back to 0 at once), and battery health from the total current and the Control Hub voltage read together
      * every 150 ms (one read per hub plus one: ~2 ms each).
      */
-    static void attachHubs(final BlackBox bb, HardwareMap hw) {
+    static void attachHubs(final BlackBox bb, HardwareMap hw, boolean bg) {
         final List<LynxModule> hubs = hw.getAll(LynxModule.class);
         if (hubs.isEmpty()) return;
         LynxModule parent = hubs.get(0);
@@ -169,7 +239,7 @@ public final class FtcBlackBox {
                 double volts = main.getInputVoltage(VoltageUnit.VOLTS);       // right after: the same instant
                 bb.batteryHealth().feed(bb.rec.time(), volts, amps);
                 return amps;
-            }}, 150);
+            }}, bg ? 500 : 150);
 
         // group encoders by the hub that reads them: a hub reset zeroes all of its encoders at once
         Map<DcMotorController, List<String>> byHub = new LinkedHashMap<DcMotorController, List<String>>();
@@ -182,7 +252,9 @@ public final class FtcBlackBox {
             if (!byHub.get(c).contains(n + ".pos")) byHub.get(c).add(n + ".pos");
         }
         for (Map.Entry<DcMotorController, List<String>> e : byHub.entrySet())
-            bb.hubResetRule("hub-of-" + firstMotor.get(e.getKey()), e.getValue().toArray(new String[0]));
+            // without the team's code we cannot know whether it reset the encoders itself: say both possibilities
+            if (bg) bb.hubZeroedRule("hub-of-" + firstMotor.get(e.getKey()), e.getValue().toArray(new String[0]));
+            else bb.hubResetRule("hub-of-" + firstMotor.get(e.getKey()), e.getValue().toArray(new String[0]));
     }
 
     private static String hubName(HardwareMap hw, LynxModule hub) {
@@ -208,7 +280,8 @@ public final class FtcBlackBox {
     /** One line telling the driver where the results are, or "" when the web page is not running. */
     public static String resultsHint() {
         String url = AsaWeb.url();
-        return url.isEmpty() ? "" : "Results: connect a phone/laptop to the robot Wi-Fi, open " + url;
+        return url.isEmpty() ? "" : AsaBlackBoxOpMode.tr("RESULTS: phone/laptop on the robot Wi-Fi, open ",
+                "РЕЗУЛЬТАТЫ: телефон/ноутбук в Wi-Fi робота, откройте ", "REZULTATE: telefon/laptop în Wi-Fi-ul robotului, deschideți ") + url;
     }
 
     private static String name(HardwareMap hw, Object device) {

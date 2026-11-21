@@ -7,7 +7,6 @@ import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DcMotorEx;
 
 import org.asa.tools.blackbox.BlackBox;
-import org.asa.tools.ftc.AsaWeb;
 import org.asa.tools.ftc.FtcBlackBox;
 
 /**
@@ -28,12 +27,10 @@ public class ExampleTeleOpBlackBox extends LinearOpMode {
         lift.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
 
         BlackBox bb = BlackBox.create("teleop");
-        FtcBlackBox.attachAll(bb, hardwareMap);                  // every motor, servo, sensor, battery + standard rules
+        FtcBlackBox.attachAll(bb, hardwareMap);                  // every motor, servo, sensor, battery + rules + results page
         FtcBlackBox.attachGamepads(bb, gamepad1, gamepad2);       // driver input on the timeline + disconnect warning
         bb.channel("lift").signal("target", () -> target).signal("inches", () -> liftInches);
         bb.notReachingRule("lift-slow", "lift.target", "lift.inches", 1.0, 1.5);
-        AsaWeb.start();                                           // http://192.168.43.1:8099/
-        AsaWeb.publish(bb);
 
         waitForStart();
         bb.start();
@@ -52,7 +49,6 @@ public class ExampleTeleOpBlackBox extends LinearOpMode {
         } finally {
             for (String line : bb.stop()) telemetry.addLine(line);   // summary + comparison with past sessions
             telemetry.update();
-            AsaWeb.publish(null);
         }
     }
 }
