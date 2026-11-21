@@ -79,6 +79,8 @@ slower"): switch the automatic recording off (**Y**), everything else works with
 **Send us** ([form](https://github.com/stanchevicid-hash/asa-blackbox/issues/new?template=robot-result.yml)) a photo of
 step 3 and anything red. That is how we learn it works on robots other than ours.
 
+**Testing for us?** The full robot test (about 1 hour, also checks every 1.5.0 fix): [TESTING.md](https://github.com/stanchevicid-hash/asa-blackbox/blob/main/TESTING.md) · [RU](https://github.com/stanchevicid-hash/asa-blackbox/blob/main/TESTING.ru.md) · [RO](https://github.com/stanchevicid-hash/asa-blackbox/blob/main/TESTING.ro.md).
+
 ## No code at all: every match is recorded
 
 Install the library, restart the robot once, and that is it. Whenever **any** OpMode runs (your Java TeleOp, your
@@ -147,7 +149,8 @@ address. Press START.
 [latest release](https://github.com/stanchevicid-hash/asa-blackbox/releases/latest) and unzip it at the root of your
 FtcRobotController project. The files land in `TeamCode/src/main/java/org/asa/tools/`. Or copy `src/org` there yourself.
 
-**OnBot Java (easiest):** download `asa-blackbox-onbot.zip` from the same release, unzip it, and upload all 17 files
+**OnBot Java (easiest):** download `asa-blackbox-onbot.zip` from the same release (or take the [`onbot/`](https://github.com/stanchevicid-hash/asa-blackbox/tree/main/onbot) folder of this
+repository), unzip it, and upload all 17 files
 into your usual `teamcode` folder in OnBot Java (no subfolders). Press Build. If the first build fails with
 "bad source file", press Build again: OnBot Java sometimes needs a second build after new files arrive.
 
