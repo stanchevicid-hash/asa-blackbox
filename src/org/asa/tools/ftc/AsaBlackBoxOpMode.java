@@ -107,7 +107,15 @@ public class AsaBlackBoxOpMode extends LinearOpMode {
                 if (!both) heldSince = 0; else if (heldSince == 0) heldSince = System.nanoTime();
                 double held = heldSince == 0 ? 0 : (System.nanoTime() - heldSince) / 1e9;
                 telemetry.addLine(Html.title(tr("Remove ASA", "Удалить ASA", "Șterge ASA")));
-                if (!plan.usedBy.isEmpty()) {   // removing the library would break the team's build: say where it is used
+                if (!plan.unmarked.isEmpty()) {   // only the team can tell whether these are an old ASA or their own files
+                    telemetry.addLine(Html.lv('y', tr("These files have ASA's names but not its mark. Nothing is removed until you check them:",
+                            "У этих файлов имена ASA, но нет её метки. Ничего не удаляется, пока вы их не проверите:",
+                            "Aceste fișiere au nume ASA, dar nu au marcajul ei. Nu se șterge nimic până nu le verificați:")));
+                    for (File f : plan.unmarked) telemetry.addLine("&nbsp;&nbsp;" + Html.esc(f.getName()));
+                    telemetry.addLine(Html.dim(tr("An older ASA version: delete them in OnBot Java. Your own files: rename them. Then Build and run Remove ASA again.",
+                            "Старая версия ASA — удалите их в OnBot Java. Ваши файлы — переименуйте. Потом Build и снова «Удалить ASA».",
+                            "Versiune ASA veche: ștergeți-le în OnBot Java. Fișierele voastre: redenumiți-le. Apoi Build și din nou „Șterge ASA”.")));
+                } else if (!plan.usedBy.isEmpty()) {   // removing the library would break the team's build: say where it is used
                     telemetry.addLine(Html.lv('r', tr("Your code uses Black Box, so nothing is removed. First take it out of:",
                             "Ваш код использует Black Box, поэтому ничего не удаляется. Сначала уберите его из:",
                             "Codul vostru folosește Black Box, așa că nu se șterge nimic. Mai întâi scoateți-l din:")));
@@ -137,7 +145,14 @@ public class AsaBlackBoxOpMode extends LinearOpMode {
         AsaWeb.stop();
         File dir = Recorder.defaultDir();
         // only a folder named like ours, so a wrong path can never delete anything else
-        int data = dir.getName().equals("asa") || dir.getName().equals("asa-logs") ? delete(dir) : 0;
+        int data = 0;
+        if (dir.getName().equals("asa") || dir.getName().equals("asa-logs")) {
+            if (!plan.keepShared) data = delete(dir);
+            else {   // ASA SysId stays: its constants in sysid/ are read by the team's code (Feedforward.load)
+                File[] kids = dir.listFiles();
+                if (kids != null) for (File k : kids) if (!k.getName().equals("sysid")) data += delete(k);
+            }
+        }
         int code = org.asa.tools.blackbox.AsaRemover.apply(plan, javaSrc);
         out.add(Html.title(tr("ASA removed", "ASA удалена", "ASA ștearsă")));
         out.add(Html.lv('g', String.format(tr("Deleted: %d library files, %d recordings and settings.", "Удалено: %d файлов библиотеки, %d записей и настроек.",
@@ -147,9 +162,6 @@ public class AsaBlackBoxOpMode extends LinearOpMode {
             out.add(Html.lv('y', tr("No ASA files in OnBot Java: if you installed it with Android Studio, delete the folder org/asa there and install the app again.",
                     "В OnBot Java файлов ASA нет: если ставили через Android Studio, удалите там папку org/asa и установите приложение заново.",
                     "În OnBot Java nu sunt fișiere ASA: dacă ați instalat cu Android Studio, ștergeți acolo folderul org/asa și instalați din nou aplicația.")));
-        for (File f : plan.unmarked)
-            out.add(Html.lv('y', tr("Looks like an older ASA file, not deleted, check it yourself: ", "Похоже на файл старой версии ASA, не удалён, проверьте сами: ",
-                    "Pare un fișier dintr-o versiune ASA mai veche, neșters, verificați-l: ") + f.getName()));
         out.add("");
         out.add("<b>" + Html.esc(tr("Last step: press STOP, then in OnBot Java press Build.", "Последний шаг: нажмите STOP, потом в OnBot Java нажмите Build.",
                 "Ultimul pas: apăsați STOP, apoi în OnBot Java apăsați Build.")) + "</b>");

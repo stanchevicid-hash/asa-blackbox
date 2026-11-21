@@ -156,7 +156,7 @@ public final class AsaAutoRecorder implements OpModeManagerNotifier.Notification
         if (!op.opModeIsActive()) return;
 
         double mOff = pct(off, 50), mOn = pct(on, 50), pOff = pct(off, 95), pOn = pct(on, 95), d = mOn - mOff;
-        char loop = d <= 1 && pOn - pOff <= 3 ? 'g' : d <= 3 ? 'y' : 'r';
+        char loop = Double.isNaN(d) ? 'n' : d <= 1 && pOn - pOff <= 3 ? 'g' : d <= 3 ? 'y' : 'r';
         double expected = period > 0 ? onSeconds * 1000 / period : 0;
         char rec = samples >= 0.7 * expected && samples > 0 ? 'g' : samples > 0 ? 'y' : 'r';
         char enc = motors.isEmpty() ? 'n' : encOk >= motors.size() ? 'g' : 'r';
@@ -164,7 +164,8 @@ public final class AsaAutoRecorder implements OpModeManagerNotifier.Notification
             Html.title(tr("Recording test: result", "Проверка записи: результат", "Test înregistrare: rezultat")),
             Html.lv(loop, String.format(java.util.Locale.US, tr("Loop: %.1f ms without recording, %.1f ms with it (%+.1f ms)",
                     "Цикл: %.1f мс без записи, %.1f мс с записью (%+.1f мс)", "Ciclu: %.1f ms fără înregistrare, %.1f ms cu ea (%+.1f ms)"), mOff, mOn, d)),
-            Html.dim(loop == 'g' ? tr("the recording does not slow your program", "запись не мешает вашей программе", "înregistrarea nu încetinește programul")
+            Html.dim(loop == 'n' ? tr("no data: the recording could not attach to this robot's hardware", "нет данных: запись не смогла подключиться к железу этого робота", "fără date: înregistrarea nu s-a putut conecta la hardware-ul robotului")
+                    : loop == 'g' ? tr("the recording does not slow your program", "запись не мешает вашей программе", "înregistrarea nu încetinește programul")
                     : loop == 'y' ? tr("a little slower: if the robot drives differently, switch the recording off (Y)", "чуть медленнее: если робот ездит иначе, выключите запись (Y)", "puțin mai lent: dacă robotul merge altfel, opriți înregistrarea (Y)")
                     : tr("clearly slower: switch the recording off (Y) and tell us", "заметно медленнее: выключите запись (Y) и напишите нам", "clar mai lent: opriți înregistrarea (Y) și scrieți-ne")),
             Html.lv(rec, String.format(java.util.Locale.US, tr("Recorded %d samples in %.0f s (expected about %.0f)", "Записано %d замеров за %.0f с (ожидалось около %.0f)",
@@ -220,6 +221,7 @@ public final class AsaAutoRecorder implements OpModeManagerNotifier.Notification
         try {
             if (op == null) return;
             String name = manager.getActiveOpModeName();
+            AsaWeb.opModeActive(name != null && !OpModeManager.DEFAULT_OP_MODE_NAME.equals(name));   // Wi-Fi rule, recorded or not
             if (skip(name, op)) return;
             Session s = new Session(op, name);
             s.begin();
@@ -233,6 +235,7 @@ public final class AsaAutoRecorder implements OpModeManagerNotifier.Notification
     }
 
     @Override public void onOpModePostStop(OpMode op) {
+        AsaWeb.opModeActive(false);
         Session s = session;
         session = null;
         if (s != null) s.finish();
@@ -314,8 +317,13 @@ public final class AsaAutoRecorder implements OpModeManagerNotifier.Notification
                 // in Autonomous the Driver Station may stop sending the gamepads: that is not a disconnect
                 if (!isAutonomous(op, name)) FtcBlackBox.attachGamepads(bb, op.gamepad1, op.gamepad2);
                 periodMs = PERIOD_MS_PER_HUB * Math.max(1, bulk.hubs.size());
+                BlackBox prev = BlackBox.lastStarted;
+                long prevNs = BlackBox.lastStartedNs;
                 bb.start();
+                // our own start must not hide a team's Black Box started earlier in this INIT (create + start, no attachAll)
+                if (BlackBox.lastStarted == bb) { BlackBox.lastStartedNs = prevNs; BlackBox.lastStarted = prev; }
                 bb.event("AUTO_RECORD", name);
+                if (!teamRecords()) AsaWeb.publish(bb);   // a team's own Black Box keeps the Live tab
                 return true;
             } catch (Throwable e) {
                 bb = null;
@@ -333,7 +341,7 @@ public final class AsaAutoRecorder implements OpModeManagerNotifier.Notification
             try {
                 while (running) {
                     long t0 = System.nanoTime();
-                    if (FtcBlackBox.manualAttachNs > attachedNs) { manual = true; break; }   // the team records this OpMode itself
+                    if (teamRecords()) { manual = true; break; }   // the team records this OpMode itself
                     if (started && !startLogged) { bb.event("START", ""); startLogged = true; startNs = System.nanoTime(); }
                     if (startLogged && !bulk.armed && System.nanoTime() - startNs > 1000000000L) bulk.armed = true;
                     try {
@@ -354,9 +362,16 @@ public final class AsaAutoRecorder implements OpModeManagerNotifier.Notification
             }
         }
 
+        /** The team's code started its own Black Box (attachAll, or create + start) since this OpMode's INIT. */
+        private boolean teamRecords() {
+            BlackBox last = BlackBox.lastStarted;
+            return FtcBlackBox.manualAttachNs > attachedNs || (last != null && last != bb && BlackBox.lastStartedNs > attachedNs);
+        }
+
         /** Not kept: the team's own Black Box records this OpMode (no double entry), or the OpMode never started. */
         private void discard() {
             if (bb == null) return;
+            AsaWeb.unpublish(bb);
             try {
                 bb.rec.stop();
                 File dir = bb.rec.dir();

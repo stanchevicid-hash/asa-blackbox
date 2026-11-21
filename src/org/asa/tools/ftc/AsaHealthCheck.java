@@ -40,6 +40,7 @@ final class AsaHealthCheck {
 
     private final LinearOpMode op;
     private final boolean[] last = new boolean[6];
+    private boolean waitRelease;
     private final File dir = Recorder.defaultDir(), labelFile = new File(dir, "battery-label.txt");
     private int label;
     private final List<LynxModule> hubs;
@@ -93,7 +94,8 @@ final class AsaHealthCheck {
         List<String> report = new ArrayList<String>();
         try {
             while (op.opModeIsActive()) {
-                if (!done && !motors.isEmpty() && auto < 0) {
+                if (waitRelease && !gamepad1.a && !gamepad1.b) waitRelease = false;
+                if (!done && !motors.isEmpty() && auto < 0 && !waitRelease) {
                     if (edge(2, gamepad1.dpad_down) && pulsePower == 0) sel = (sel + 1) % motors.size();
                     if (edge(3, gamepad1.dpad_up) && pulsePower == 0) sel = (sel + motors.size() - 1) % motors.size();
                     DcMotorEx m = motors.get(sel);
@@ -117,8 +119,9 @@ final class AsaHealthCheck {
                     sel = auto;
                     double t = op.getRuntime();
                     if (gamepad1.b) {                                    // B stops the automatic test at once
-                        for (DcMotorEx mm : motors) mm.setPower(0);
+                        stopAll();
                         auto = -1;
+                        waitRelease = true;                              // B still held must not turn this motor backward
                     } else if (autoT0 < 0) {
                         autoT0 = t; startTicks = m.getCurrentPosition(); maxVel = 0; maxAmps = 0;
                         m.setPower(AUTO_POWER);
@@ -140,11 +143,11 @@ final class AsaHealthCheck {
                     }
                 }
                 if (edge(4, gamepad1.x) && !done) {
-                    for (DcMotorEx mm : motors) mm.setPower(0);
+                    stopAll();
                     report = bb.stop();
                     done = true;
                 }
-                else if (edge(5, gamepad1.y) && done) {                     // test again: the automatic test, results kept
+                else if (edge(5, gamepad1.y) && done && !motors.isEmpty()) {                     // test again: the automatic test, results kept
                     bb = session();
                     done = false;
                     auto = 0;
@@ -186,9 +189,14 @@ final class AsaHealthCheck {
                 telemetry.update();
             }
         } finally {
-            for (DcMotorEx mm : motors) mm.setPower(0);
+            stopAll();
             bb.stop();
         }
+    }
+
+    /** Every motor to 0, each on its own: a hub that stopped answering must not leave the others turning. */
+    private void stopAll() {
+        for (DcMotorEx m : motors) { try { m.setPower(0); } catch (Exception ignored) {} }
     }
 
     /** What a short run of one motor says about it; the first character is its traffic light (g, y, r). */

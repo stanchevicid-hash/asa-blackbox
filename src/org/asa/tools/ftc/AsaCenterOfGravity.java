@@ -34,6 +34,8 @@ final class AsaCenterOfGravity {
 
     private final LinearOpMode op;
     private final boolean[] last = new boolean[7];
+    /** A balance step tips the robot at least this far from flat (degrees); real balance angles are 20-60°. */
+    static final double MIN_TILT = 3;
     private final File settings = new File(Recorder.defaultDir(), "cog-settings.txt");
     private double wheelbase, track;
 
@@ -116,9 +118,12 @@ final class AsaCenterOfGravity {
                 boolean steady = k == pBuf.length && wobble < 0.5;
                 double tilt = taken[0] == null ? 0 : CenterOfGravity.tiltBetween(taken[0][0], taken[0][1], pm, rm);
 
-                if (result == null && edge(4, gamepad1.a) && steady) {
+                // steps 2-5 must really tip the robot: a second press without moving would give a 0° angle (and a division by 0)
+                boolean tipped = step == 0 || tilt >= MIN_TILT;
+                if (result == null && edge(4, gamepad1.a) && steady && tipped) {
                     taken[step] = new double[]{pm, rm};
                     step++;
+                    n = 0;   // the next step averages only readings taken after this press
                     if (step == steps.length) {
                         double[] deg = new double[4];
                         for (int i = 1; i < steps.length; i++) deg[i - 1] = CenterOfGravity.tiltBetween(taken[0][0], taken[0][1], taken[i][0], taken[i][1]);
@@ -135,8 +140,9 @@ final class AsaCenterOfGravity {
                     for (int i = 0; i < steps.length; i++) dots.append(i < step ? "●" : i == step ? "◉" : "○").append(' ');
                     telemetry.addLine(H.title(tr("Center of gravity", "Центр тяжести", "Centrul de greutate")) + H.gap() + H.c(H.PINK, dots.toString()));
                     telemetry.addLine("<b>" + H.esc(steps[step]) + "</b>");
-                    telemetry.addLine(steady ? H.lv('g', tr("steady: press A", "робот неподвижен: нажмите A", "stabil: apăsați A"))
-                                             : H.lv('y', tr("hold still...", "держите неподвижно...", "țineți nemișcat...")));
+                    telemetry.addLine(!tipped ? H.lv('y', String.format(java.util.Locale.US, tr("tip it more: at least %.0f°", "наклоните сильнее: хотя бы %.0f°", "înclinați mai mult: cel puțin %.0f°"), MIN_TILT))
+                            : steady ? H.lv('g', tr("steady: press A", "робот неподвижен: нажмите A", "stabil: apăsați A"))
+                                     : H.lv('y', tr("hold still...", "держите неподвижно...", "țineți nemișcat...")));
                     if (taken[0] != null) telemetry.addLine(H.dim(tr("tilt ", "наклон ", "înclinare ")) + String.format(java.util.Locale.US, "%.1f°", tilt));
                     telemetry.addLine(H.dim(tr("B = back, Y = start over", "B = назад, Y = начать заново", "B = înapoi, Y = de la început")));
                     AsaWeb.status(tr("Center of gravity: ", "Центр тяжести: ", "Centrul de greutate: ") + s);
@@ -226,6 +232,7 @@ final class AsaCenterOfGravity {
             r.close();
             v[0] = Double.parseDouble(p[0]);
             v[1] = Double.parseDouble(p[1]);
+            for (int i = 0; i < 2; i++) if (!(v[i] >= 5 && v[i] < 500)) v[i] = 30;   // a damaged file must not give 0 or NaN
         } catch (Exception ignored) {}
         return v;
     }

@@ -415,8 +415,14 @@ public class BlackBox implements Live {
 
     // ---------------------------------------------------------------- loop
 
+    /** The newest Black Box started and when: the automatic recorder steps aside for a team's own one. */
+    public static volatile BlackBox lastStarted;
+    public static volatile long lastStartedNs = Long.MIN_VALUE;
+
     public BlackBox start() {
         if (rec.isStarted()) return this;
+        lastStarted = this;
+        lastStartedNs = System.nanoTime();
         rec.signal("loop_ms", new Recorder.Source() { public double get() { return loopMs; } });
         rec.start(dir, tag);
         rec.event("SESSION_START", tag);

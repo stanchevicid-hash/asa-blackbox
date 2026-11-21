@@ -83,7 +83,9 @@ step 3 and anything red. That is how we learn it works on robots other than ours
 
 Install the library, restart the robot once, and that is it. Whenever **any** OpMode runs (your Java TeleOp, your
 Autonomous, even a Blocks program), Black Box records it in the background, with nothing added to your code:
-motors (power, position, speed, current), servos, battery, hubs, sensors and both gamepads, with every warning above.
+motors (power, position, speed, current), servos, battery, hubs and both gamepads (no gamepads in Autonomous), with every
+warning above. The IMU and other sensors are not read by the automatic recording: at INIT that would interfere with
+their initialization. The 4 lines record them.
 Each recording is named after the OpMode, so "TeleOp Main" is compared with your earlier "TeleOp Main" runs.
 
 How it stays out of the way during a match:
@@ -266,8 +268,9 @@ Java and one folder on the Control Hub, `FIRST/asa`.
 
 What the button deletes, and only that:
 - recordings, results and settings (the folder `FIRST/asa`);
-- the library's files in OnBot Java, only those starting with the line `// ASA Black Box library file`: your own
-  `Recorder.java` or `Rule.java`, if you have one, is not touched;
+- the library's files: in OnBot Java's `teamcode` folder only those starting with the line `// ASA Black Box library file`
+  (your own `Recorder.java` or `Rule.java`, if you have one, is not touched), and Black Box's files in `org/asa/tools`;
+- a file with an ASA name, without the mark, that looks like ASA: nothing is deleted and it is shown for you to check;
 - the recording and the results page stop at once, before the Build.
 
 What it does not do:
@@ -276,8 +279,9 @@ What it does not do:
 - with ASA SysId installed, the files it shares stay and SysId keeps working;
 - files of an older version without the mark are named for you to check, not deleted.
 
-**By hand** (e.g. installed with Android Studio): delete the 17 files `AsaAutoRecorder` `AsaBatteryHealth` `AsaBlackBoxOpMode` `AsaCenterOfGravity` `AsaCenterOfGravityMath` `AsaDashboard` `AsaFtc` `AsaHealthCheck` `AsaLive` `AsaRecorder` `AsaRemover` `AsaRule` `AsaWeb` `AsaWebPage` `AsaWpiLog` `BlackBox` `FtcBlackBox` (`.java`) or the folder
-`TeamCode/src/main/java/org/asa`, Build / reinstall the app, then **Restart Robot**.
+**By hand.** OnBot Java: delete the 17 files `AsaAutoRecorder` `AsaBatteryHealth` `AsaBlackBoxOpMode` `AsaCenterOfGravity` `AsaCenterOfGravityMath` `AsaDashboard` `AsaFtc` `AsaHealthCheck` `AsaLive` `AsaRecorder` `AsaRemover` `AsaRule` `AsaWeb` `AsaWebPage` `AsaWpiLog` `BlackBox` `FtcBlackBox` (`.java`), Build. Android Studio: delete the folder
+`TeamCode/src/main/java/org/asa` (with ASA SysId there too, keep `core`, `ftc/AsaWeb*`, `ftc/Ftc.java`, `sysid`), reinstall
+the app. Then **Restart Robot**.
 
 Only want it off, not removed? ASA Black Box → **Y** → "Automatic recording is off". Then ASA starts nothing when the
 robot is turned on: no recording, no page.

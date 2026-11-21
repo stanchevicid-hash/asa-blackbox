@@ -69,17 +69,39 @@ public final class FtcBlackBox {
          */
         volatile boolean armed;
         Bulk(List<LynxModule> hubs) { this.hubs = hubs; data = new LynxModule.BulkData[hubs.size()]; }
+
+        /**
+         * One bulk read per hub whose caching is OFF (the SDK default). A hub in AUTO or MANUAL is read through the
+         * motor getters instead: they use the team's own cache, while getBulkData() would clear and refill it in the
+         * middle of their loop. A hub that does not answer returns all zeros ("fake" data): treated as no data.
+         */
         void refresh() {
             LynxModule.BulkData[] d = new LynxModule.BulkData[hubs.size()];
-            for (int i = 0; i < d.length; i++) { try { d[i] = hubs.get(i).getBulkData(); } catch (Exception e) { d[i] = null; } }
+            for (int i = 0; i < d.length; i++) {
+                try {
+                    LynxModule h = hubs.get(i);
+                    if (h.getBulkCachingMode() != LynxModule.BulkCachingMode.OFF) continue;
+                    LynxModule.BulkData b = h.getBulkData();
+                    d[i] = b == null || b.isFake() ? null : b;
+                } catch (Exception e) { d[i] = null; }
+            }
             data = d;
         }
+
+        boolean useBulk(int hub) {
+            try { return hubs.get(hub).getBulkCachingMode() == LynxModule.BulkCachingMode.OFF; } catch (Exception e) { return false; }
+        }
+
+        /**
+         * The hub of a motor by its connection ("<usb>; module <address>"): the serial number is the USB device's,
+         * shared by a Control Hub and the Expansion Hub behind it, so it cannot tell them apart.
+         */
         int hubOf(DcMotor m) {
             try {
                 Object c = m.getController();
                 if (c instanceof com.qualcomm.hardware.lynx.LynxController) {
-                    Object sn = ((com.qualcomm.hardware.lynx.LynxController) c).getSerialNumber();
-                    for (int i = 0; i < hubs.size(); i++) if (hubs.get(i).getSerialNumber().equals(sn)) return i;
+                    String ci = ((com.qualcomm.hardware.lynx.LynxController) c).getConnectionInfo();
+                    for (int i = 0; i < hubs.size(); i++) if (hubs.get(i).getConnectionInfo().equals(ci)) return i;
                 }
             } catch (Exception ignored) {}
             return -1;
@@ -107,10 +129,17 @@ public final class FtcBlackBox {
             c.signal("power", new Recorder.Source() { public double get() { return m.getPower(); } });
             final int hub = bg ? bulk.hubOf(m) : -1, port = m.getPortNumber();
             if (hub >= 0) {   // raw bulk values carry no direction: apply it like getCurrentPosition() does
-                c.signal("pos", new Recorder.Source() { public double get() { LynxModule.BulkData d = bulk.data[hub];
+                c.signal("pos", new Recorder.Source() { public double get() {
+                    if (!bulk.useBulk(hub)) return m.getCurrentPosition();
+                    LynxModule.BulkData d = bulk.data[hub];
                     return d == null ? Double.NaN : sign(m) * d.getMotorCurrentPosition(port); } });
-                c.signal("vel", new Recorder.Source() { public double get() { LynxModule.BulkData d = bulk.data[hub];
-                    return d == null ? Double.NaN : sign(m) * d.getMotorVelocity(port); } });
+                if (m instanceof DcMotorEx) {
+                    final DcMotorEx e = (DcMotorEx) m;
+                    c.signal("vel", new Recorder.Source() { public double get() {
+                        if (!bulk.useBulk(hub)) return e.getVelocity();
+                        LynxModule.BulkData d = bulk.data[hub];
+                        return d == null ? Double.NaN : sign(m) * d.getMotorVelocity(port); } });
+                }
             } else {
                 c.signal("pos", new Recorder.Source() { public double get() { return m.getCurrentPosition(); } }, bg ? 100 : 0);
                 if (m instanceof DcMotorEx) {
@@ -139,14 +168,26 @@ public final class FtcBlackBox {
         bb.brownoutRule("battery", 8.0).lowBatteryAtStartRule(idleBattery(hw), 12.4);   // INIT: robot idle
         // loop time is the team's loop only when their code calls update(); the recorder's own thread says nothing about it
         if (!bg) bb.slowLoopRule(50).pauseRule(150);
-        attachSensors(bb, hw, powers.toArray(new String[0]), bulk);
+        // Background mode records no IMU or other sensors: HardwareMap.getAll() initializes I2C devices (a BHI260 IMU
+        // may even load its firmware) under the map's lock, which would hold up the team's INIT. The 4 lines record them.
+        if (!bg) attachSensors(bb, hw, powers.toArray(new String[0]), null);
         attachHubs(bb, hw, bg);
         // the results page starts by itself and shows this session live (it goes back to "Sessions" after stop())
         AsaWeb.start();
-        AsaWeb.publish(bb);
+        if (!bg) AsaWeb.publish(bb);   // the automatic recorder publishes only when the team does not record itself
     }
 
-    private static int sign(DcMotor m) { return m.getDirection() == DcMotorSimple.Direction.REVERSE ? -1 : 1; }
+    /**
+     * The sign getCurrentPosition() applies: the SDK reverses by the "operational" direction, which is the set direction
+     * inverted for motor types that turn the other way (CCW orientation: goBILDA 5202/3/4, REV HD Hex, NeveRest...).
+     */
+    private static int sign(DcMotor m) {
+        boolean reverse = m.getDirection() == DcMotorSimple.Direction.REVERSE;
+        try {
+            if (m.getMotorType().getOrientation() == org.firstinspires.ftc.robotcore.external.navigation.Rotation.CCW) reverse = !reverse;
+        } catch (Exception ignored) {}
+        return reverse ? -1 : 1;
+    }
 
     private static double idleBattery(HardwareMap hw) { try { return Ftc.battery(hw).get(); } catch (Exception e) { return Double.NaN; } }
 

@@ -94,6 +94,47 @@ public class RemoverTest {
         AsaRemover.apply(p, src);
         check(old.isFile(), "not deleted");
 
+        System.out.println("TRICKS THAT MUST NOT HIDE A USE");
+        String[][] tricks = {
+            {"a URL string before the code", "class A { String u = \"http://192.168.43.1:8080\"; BlackBox bb; }"},
+            {"a /* inside a string", "class A { String g = \"logs/*.csv\"; FtcBlackBox f; String e = \"*/\"; }"},
+            {"a renamed public type only", "class A { void add(AsaRule r) {} }"},
+            {"a shared renamed type (no SysId)", "class A { AsaRecorder rec; }"},
+            {"a package-layout import", "import org.asa.tools.blackbox.BlackBox;\nclass A {}"},
+        };
+        for (String[] u : tricks) {
+            src = Files.createTempDirectory("rm7").toFile();
+            team = onbot(src);
+            File t = write(team, "TeleOp.java", u[1]);
+            p = AsaRemover.plan(src);
+            check(p.usedBy.contains(t) && AsaRemover.apply(p, src) == 0 && new File(team, "BlackBox.java").isFile(), u[0] + ": found, nothing deleted");
+        }
+        src = Files.createTempDirectory("rm8").toFile();
+        team = onbot(src);
+        File str = write(team, "TeleOp.java", "class A { void t() { log(\"BlackBox off\"); } }   // FtcBlackBox later");
+        p = AsaRemover.plan(src);
+        check(p.usedBy.isEmpty(), "Black Box only inside a string or a comment does not block");
+
+        System.out.println("UNMARKED LOOK-ALIKE: blocks until the team checks it");
+        src = Files.createTempDirectory("rm9").toFile();
+        team = onbot(src);
+        File dash = write(team, "Dashboard.java", "// feeds FtcBlackBox\nclass Dashboard { FtcBlackBox bb; }");
+        File nasa = write(team, "Live.java", "// NASA telemetry, not ours\nclass Live {}");
+        p = AsaRemover.plan(src);
+        check(p.unmarked.contains(dash) && !p.unmarked.contains(nasa), "a file with our name that mentions Black Box is held; 'NASA' is not 'ASA'");
+        check(AsaRemover.apply(p, src) == 0 && dash.isFile() && new File(team, "BlackBox.java").isFile(), "nothing deleted while it is unchecked");
+
+        System.out.println("MARKED COPY IN A SUBFOLDER, PACKAGE EXAMPLE");
+        src = Files.createTempDirectory("rm10").toFile();
+        team = onbot(src);
+        File copy = write(new File(team, "asa"), "AsaRule.java", AsaRemover.MARK + ".\nclass AsaRule {}");
+        File example = write(new File(src, "org/asa/tools/examples"), "ExampleTeleOpBlackBox.java", "class ExampleTeleOpBlackBox { BlackBox b; }");
+        File sysEx = write(new File(src, "org/asa/tools/examples"), "ExampleLiftSysId.java", "class ExampleLiftSysId {}");
+        p = AsaRemover.plan(src);
+        check(p.usedBy.isEmpty() && p.delete.contains(copy) && p.delete.contains(example), "a marked copy elsewhere and the Black Box example are ours, not the team's use");
+        AsaRemover.apply(p, src);
+        check(!copy.exists() && !example.exists() && sysEx.isFile(), "both deleted, SysId's example kept");
+
         System.out.println("ANDROID STUDIO (nothing in OnBot)");
         p = AsaRemover.plan(Files.createTempDirectory("rm6").toFile());
         check(p.nothingInOnBot(), "nothing to delete is reported as such");
