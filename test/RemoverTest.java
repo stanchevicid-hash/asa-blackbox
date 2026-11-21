@@ -16,9 +16,10 @@ public class RemoverTest {
         if (!ok) failures++;
     }
 
+    /** The OnBot bundle's 17 files, as onbot.py names them. */
     static final String[] LIB = {"AsaAutoRecorder", "AsaBlackBoxOpMode", "AsaCenterOfGravity", "AsaHealthCheck", "AsaRemover",
-            "BatteryHealth", "BlackBox", "CenterOfGravity", "FtcBlackBox", "Rule", "AsaWeb", "AsaWebPage", "Dashboard",
-            "Ftc", "Live", "Recorder", "WpiLog"};
+            "AsaBatteryHealth", "BlackBox", "AsaCenterOfGravityMath", "FtcBlackBox", "AsaRule", "AsaWeb", "AsaWebPage", "AsaDashboard",
+            "AsaFtc", "AsaLive", "AsaRecorder", "AsaWpiLog"};
 
     static File write(File dir, String name, String text) throws Exception {
         dir.mkdirs();
@@ -42,15 +43,16 @@ public class RemoverTest {
         // the team's own files, some with the same names as ours
         File teleop = write(team, "TeleOpMain.java", "class TeleOpMain { void loop() { drive(); } }");
         File noted = write(team, "Auto.java", "// we tried BlackBox once\n/* FtcBlackBox.attachAll */\nclass Auto {}");
-        new File(team, "Rule.java").delete();
+        // the team's own Rule.java and Recorder.java: the bundle no longer even has these names
         File ownRule = write(team, "Rule.java", "package org.firstinspires.ftc.teamcode;\nclass Rule { int points; }");
+        File ownRec = write(team, "Recorder.java", "package org.firstinspires.ftc.teamcode;\nclass Recorder { void save() {} }");
         AsaRemover.Plan p = AsaRemover.plan(src);
         check(p.usedBy.isEmpty(), "a comment that mentions Black Box does not count as using it");
-        check(p.delete.size() == LIB.length - 1, "deletes our " + (LIB.length - 1) + " marked files (planned " + p.delete.size() + ")");
-        check(!p.delete.contains(ownRule) && !p.unmarked.contains(ownRule), "the team's own Rule.java (no mark, not ASA) is not touched");
+        check(p.delete.size() == LIB.length, "deletes our " + LIB.length + " marked files (planned " + p.delete.size() + ")");
+        check(!p.delete.contains(ownRule) && !p.unmarked.contains(ownRule) && !p.delete.contains(ownRec), "the team's own Rule.java and Recorder.java are not touched");
         int n = AsaRemover.apply(p, src);
-        check(n == LIB.length - 1, "deleted " + n);
-        check(teleop.isFile() && noted.isFile() && ownRule.isFile(), "the team's files are all still there");
+        check(n == LIB.length, "deleted " + n);
+        check(teleop.isFile() && noted.isFile() && ownRule.isFile() && ownRec.isFile(), "the team's files are all still there");
 
         System.out.println("TEAM CODE USES BLACK BOX: nothing deleted");
         src = Files.createTempDirectory("rm2").toFile();
@@ -67,7 +69,7 @@ public class RemoverTest {
         p = AsaRemover.plan(src);
         check(p.keepShared && p.usedBy.isEmpty(), "SysId detected, its use of AsaWeb / Recorder does not block");
         AsaRemover.apply(p, src);
-        check(!new File(team, "BlackBox.java").exists() && new File(team, "Recorder.java").isFile()
+        check(!new File(team, "BlackBox.java").exists() && new File(team, "AsaRecorder.java").isFile()
                 && new File(team, "AsaWeb.java").isFile() && new File(team, "AsaSysIdOpMode.java").isFile(), "Black Box gone, SysId and the shared files kept");
 
         System.out.println("PACKAGE LAYOUT (org/asa/tools/...)");

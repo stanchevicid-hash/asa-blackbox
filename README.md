@@ -96,6 +96,10 @@ How it stays out of the way during a match:
 - INIT then STOP without START is not kept; the newest 300 recordings are kept on the Control Hub, older ones are
   deleted (center of gravity results and battery history are never deleted).
 
+**At competitions:** the recording needs no phone. During a match do not connect phones or laptops to the robot
+Wi-Fi: the Driver Station drives the robot over it (and FTC rules forbid it). Look at recordings in the pits. While
+a program drives, the page does not send big files, so it never takes the Wi-Fi.
+
 Switch it off or on in the **ASA Black Box** program: **Y** at INIT. Without your code it cannot see your loop time,
 your own values (targets, states) or your events: for those, add the 4 lines below.
 
@@ -144,6 +148,10 @@ FtcRobotController project. The files land in `TeamCode/src/main/java/org/asa/to
 **OnBot Java (easiest):** download `asa-blackbox-onbot.zip` from the same release, unzip it, and upload all 17 files
 into your usual `teamcode` folder in OnBot Java (no subfolders). Press Build. If the first build fails with
 "bad source file", press Build again: OnBot Java sometimes needs a second build after new files arrive.
+
+Every file name except `BlackBox` and `FtcBlackBox` starts with `Asa`, so uploading never replaces your own files.
+**Had version 1.4?** First delete its old files `Rule`, `Live`, `Recorder`, `Ftc`, `Dashboard`, `WpiLog`,
+`BatteryHealth`, `CenterOfGravity` (unless they are your own files with those names).
 
 **Then, once: Restart Robot** (Driver Hub menu ⋮ → Restart Robot). That switches on the automatic recording
 below. Until then it starts the first time you run the "ASA Black Box" program.
@@ -268,7 +276,7 @@ What it does not do:
 - with ASA SysId installed, the files it shares stay and SysId keeps working;
 - files of an older version without the mark are named for you to check, not deleted.
 
-**By hand** (e.g. installed with Android Studio): delete the 17 files `AsaAutoRecorder` `AsaBlackBoxOpMode` `AsaCenterOfGravity` `AsaHealthCheck` `AsaRemover` `AsaWeb` `AsaWebPage` `BatteryHealth` `BlackBox` `CenterOfGravity` `Dashboard` `Ftc` `FtcBlackBox` `Live` `Recorder` `Rule` `WpiLog` (`.java`) or the folder
+**By hand** (e.g. installed with Android Studio): delete the 17 files `AsaAutoRecorder` `AsaBatteryHealth` `AsaBlackBoxOpMode` `AsaCenterOfGravity` `AsaCenterOfGravityMath` `AsaDashboard` `AsaFtc` `AsaHealthCheck` `AsaLive` `AsaRecorder` `AsaRemover` `AsaRule` `AsaWeb` `AsaWebPage` `AsaWpiLog` `BlackBox` `FtcBlackBox` (`.java`) or the folder
 `TeamCode/src/main/java/org/asa`, Build / reinstall the app, then **Restart Robot**.
 
 Only want it off, not removed? ASA Black Box → **Y** → "Automatic recording is off". Then ASA starts nothing when the

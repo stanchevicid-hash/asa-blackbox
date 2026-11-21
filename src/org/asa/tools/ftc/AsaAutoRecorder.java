@@ -120,8 +120,11 @@ public final class AsaAutoRecorder implements OpModeManagerNotifier.Notification
             if (rec) {
                 s = new Session(op, "ASA record test");
                 s.test = true;
+                s.force = true;
                 s.begin();
                 s.started = true;
+                try { s.ready.await(3, java.util.concurrent.TimeUnit.SECONDS); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+                if (s.bb == null) { s = null; continue; }   // could not attach: reported as "no samples"
                 period = s.periodMs;
             }
             long t0 = System.nanoTime(), prev = t0, end = t0 + 4000000000L;
@@ -215,7 +218,7 @@ public final class AsaAutoRecorder implements OpModeManagerNotifier.Notification
         if (old != null) old.finish();
         session = null;
         try {
-            if (op == null || !enabled()) return;
+            if (op == null) return;
             String name = manager.getActiveOpModeName();
             if (skip(name, op)) return;
             Session s = new Session(op, name);
@@ -281,15 +284,18 @@ public final class AsaAutoRecorder implements OpModeManagerNotifier.Notification
 
         Session(OpMode op, String name) { this.op = op; this.name = name; }
 
+        /** The self-test records even when the automatic recording is switched off. */
+        boolean force;
+        /** Set once prepare() has run (the self-test waits for it). */
+        final java.util.concurrent.CountDownLatch ready = new java.util.concurrent.CountDownLatch(1);
+
+        /**
+         * Called on the SDK's thread at INIT, right before the team's init(): it only starts our thread. Files, the
+         * settings file and the first hardware reads all happen on our thread, so a slow disk or a slow hub can never
+         * delay the team's INIT.
+         */
         void begin() {
-            bb = BlackBox.create(name);
-            bulk = FtcBlackBox.attachBackground(bb, op.hardwareMap);
-            // in Autonomous the Driver Station may stop sending the gamepads: that is not a disconnect
-            if (!isAutonomous(op, name)) FtcBlackBox.attachGamepads(bb, op.gamepad1, op.gamepad2);
-            attachedNs = System.nanoTime();
-            periodMs = PERIOD_MS_PER_HUB * Math.max(1, bulk.hubs.size());
-            bb.start();
-            bb.event("AUTO_RECORD", name);
+            attachedNs = System.nanoTime();   // the team's own attachAll after this moment means: they record themselves
             Thread t = new Thread(this, "asa-autorecord");
             t.setDaemon(true);
             t.setPriority(Thread.NORM_PRIORITY - 1);   // the team's OpMode thread always goes first
@@ -299,7 +305,28 @@ public final class AsaAutoRecorder implements OpModeManagerNotifier.Notification
 
         void finish() { running = false; }
 
+        /** Attaches to the OpMode's hardware and opens the files: on our thread. False when switched off or failed. */
+        private boolean prepare() {
+            try {
+                if (!force && !enabled()) return false;
+                bb = BlackBox.create(name);
+                bulk = FtcBlackBox.attachBackground(bb, op.hardwareMap);
+                // in Autonomous the Driver Station may stop sending the gamepads: that is not a disconnect
+                if (!isAutonomous(op, name)) FtcBlackBox.attachGamepads(bb, op.gamepad1, op.gamepad2);
+                periodMs = PERIOD_MS_PER_HUB * Math.max(1, bulk.hubs.size());
+                bb.start();
+                bb.event("AUTO_RECORD", name);
+                return true;
+            } catch (Throwable e) {
+                bb = null;
+                return false;
+            } finally {
+                ready.countDown();
+            }
+        }
+
         @Override public void run() {
+            if (!prepare()) return;
             prune(bb.rec.dir(), KEEP);
             int errors = 0;
             boolean manual = false;
@@ -329,6 +356,7 @@ public final class AsaAutoRecorder implements OpModeManagerNotifier.Notification
 
         /** Not kept: the team's own Black Box records this OpMode (no double entry), or the OpMode never started. */
         private void discard() {
+            if (bb == null) return;
             try {
                 bb.rec.stop();
                 File dir = bb.rec.dir();

@@ -23,11 +23,13 @@ public final class AsaRemover {
     /** First line of every library file in the OnBot bundle (written by onbot.py). */
     public static final String MARK = "// ASA Black Box library file";
 
-    /** Black Box only. */
+    /** Black Box only (with the names the OnBot bundle gives them, "Asa..." in front of ordinary names). */
     static final List<String> OWN = Arrays.asList("AsaAutoRecorder", "AsaBlackBoxOpMode", "AsaCenterOfGravity", "AsaHealthCheck",
-            "AsaRemover", "BatteryHealth", "BlackBox", "CenterOfGravity", "FtcBlackBox", "Rule");
+            "AsaRemover", "BatteryHealth", "BlackBox", "CenterOfGravity", "FtcBlackBox", "Rule",
+            "AsaBatteryHealth", "AsaCenterOfGravityMath", "AsaRule");
     /** Also used by ASA SysId. */
-    static final List<String> SHARED = Arrays.asList("AsaWeb", "AsaWebPage", "Dashboard", "Ftc", "Live", "Recorder", "WpiLog");
+    static final List<String> SHARED = Arrays.asList("AsaWeb", "AsaWebPage", "Dashboard", "Ftc", "Live", "Recorder", "WpiLog",
+            "AsaDashboard", "AsaFtc", "AsaLive", "AsaRecorder", "AsaWpiLog");
 
     /** What a removal would do. Nothing is deleted until apply(). */
     public static final class Plan {
@@ -57,7 +59,7 @@ public final class AsaRemover {
             if (!f.isFile()) continue;
             String head = read(f, 400);
             if (head.startsWith(MARK)) p.delete.add(f);
-            else if (head.contains("ASA") || head.contains("BlackBox") || head.contains("Recorder.Source")) p.unmarked.add(f);
+            else if (head.contains("ASA") || head.contains("BlackBox") || head.contains("Black Box") || head.contains("Recorder.Source")) p.unmarked.add(f);
         }
         for (String sub : new String[]{"blackbox", "ftc", "core"}) {
             File[] fs = new File(pkg, sub).listFiles();
