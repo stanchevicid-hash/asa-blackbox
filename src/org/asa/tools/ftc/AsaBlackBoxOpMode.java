@@ -14,7 +14,7 @@ import java.io.FileWriter;
 /**
  * The one ASA Black Box program on the Driver Hub. No code to write.
  *
- * INIT: LB / RB = mode (Health check, Center of gravity, Recording test, Delete ASA data), X = language (EN, RU, RO), Y = automatic
+ * INIT: LB / RB = mode (Health check, Center of gravity, Recording test, Remove ASA), X = language (EN, RU, RO), Y = automatic
  * recording on / off, then the mode's own settings. The screen also says whether the automatic recording is hooked in,
  * the newest recording and whether the results page runs.
  * START runs the chosen mode. The results page starts by itself: http://192.168.43.1:8099/ on the robot Wi-Fi.
@@ -53,7 +53,7 @@ public class AsaBlackBoxOpMode extends LinearOpMode {
             if (edge(2, gamepad1.x)) { lang = (lang + 1) % LANGS.length; write(langFile, LANGS[lang].toLowerCase()); }
             if (edge(3, gamepad1.y)) { auto = !auto; AsaAutoRecorder.setEnabled(auto); }
             String[] modes = {tr("Health check", "Проверка робота", "Verificare robot"), tr("Center of gravity", "Центр тяжести", "Centrul de greutate"),
-                    tr("Recording test", "Проверка записи", "Test înregistrare"), tr("Delete ASA data", "Удалить данные ASA", "Șterge datele ASA")};
+                    tr("Recording test", "Проверка записи", "Test înregistrare"), tr("Remove ASA", "Удалить ASA", "Șterge ASA")};
             StringBuilder menu = new StringBuilder();
             for (int i = 0; i < modes.length; i++) menu.append(i > 0 ? Html.gap() : "").append(i == mode ? Html.pick(modes[i]) : Html.dim(modes[i]));
             telemetry.addLine(Html.title("ASA Black Box"));
@@ -73,12 +73,12 @@ public class AsaBlackBoxOpMode extends LinearOpMode {
             if (mode == 0) health.initLoop();
             else if (mode == 1) cog.initLoop();
             else if (mode == 3) {
-                telemetry.addLine(Html.lv('r', tr("Deletes every ASA recording, result and setting on this robot (the folder FIRST/asa).",
-                        "Удаляет все записи, результаты и настройки ASA на этом роботе (папку FIRST/asa).",
-                        "Șterge toate înregistrările, rezultatele și setările ASA de pe acest robot (folderul FIRST/asa).")));
-                telemetry.addLine(Html.dim(tr("Your team's code and configuration are not touched. After START: hold A and B for 3 s.",
-                        "Код и конфигурация вашей команды не трогаются. После START: держите A и B 3 секунды.",
-                        "Codul și configurația echipei nu se ating. După START: țineți A și B 3 secunde.")));
+                telemetry.addLine(Html.lv('r', tr("Removes ASA Black Box from this robot: its recordings and settings (folder FIRST/asa) and its files in OnBot Java.",
+                        "Удаляет ASA Black Box с этого робота: записи и настройки (папка FIRST/asa) и файлы библиотеки в OnBot Java.",
+                        "Șterge ASA Black Box de pe acest robot: înregistrările și setările (folderul FIRST/asa) și fișierele bibliotecii din OnBot Java.")));
+                telemetry.addLine(Html.dim(tr("Only files marked as ASA. Your code, your configuration and ASA SysId stay. After START: hold A and B for 3 s.",
+                        "Только файлы с меткой ASA. Ваш код, конфигурация и ASA SysId остаются. После START: держите A и B 3 секунды.",
+                        "Doar fișierele marcate ASA. Codul, configurația și ASA SysId rămân. După START: țineți A și B 3 secunde.")));
             }
             else telemetry.addLine(Html.dim(tr("Checks that the automatic recording does not slow a program like yours and really records. No motor turns. About 16 s.",
                     "Проверяет, что автозапись не замедляет программу вроде вашей и действительно пишет. Моторы не крутятся. Около 16 с.",
@@ -88,37 +88,73 @@ public class AsaBlackBoxOpMode extends LinearOpMode {
         }
         if (mode < 3) write(modeFile, mode == 0 ? "health" : mode == 1 ? "cog" : "test");   // deleting is never the default next time
         if (isStopRequested()) return;
-        if (mode == 0) health.run(); else if (mode == 1) cog.run(); else if (mode == 2) AsaAutoRecorder.selfTest(this); else deleteData();
+        if (mode == 0) health.run(); else if (mode == 1) cog.run(); else if (mode == 2) AsaAutoRecorder.selfTest(this); else removeAsa();
     }
 
-    /** Deletes the ASA folder after A and B are held together for 3 s. Only that folder: never anything else. */
-    private void deleteData() {
-        File dir = Recorder.defaultDir();
+    /**
+     * Remove ASA, after A and B are held together for 3 s: stops the recording and the page at once, deletes the folder
+     * FIRST/asa and the library's own files in OnBot Java (AsaRemover decides which: only ours, never the team's).
+     * If the team's code still uses Black Box, nothing is deleted and the files to change are listed.
+     */
+    private void removeAsa() {
+        File javaSrc = new File("/sdcard/FIRST/java/src");
+        org.asa.tools.blackbox.AsaRemover.Plan plan = org.asa.tools.blackbox.AsaRemover.plan(javaSrc);
         long heldSince = 0;
-        String done = null;
+        java.util.List<String> result = null;
         while (opModeIsActive()) {
-            if (done == null) {
+            if (result == null) {
                 boolean both = gamepad1.a && gamepad1.b;
                 if (!both) heldSince = 0; else if (heldSince == 0) heldSince = System.nanoTime();
                 double held = heldSince == 0 ? 0 : (System.nanoTime() - heldSince) / 1e9;
-                if (held >= 3) {
-                    // only a folder named like ours, so a wrong path can never delete anything else
-                    int n = dir.getName().equals("asa") || dir.getName().equals("asa-logs") ? delete(dir) : 0;
-                    done = String.format(tr("Deleted: %d files. To remove the library too: delete the ASA files in OnBot Java, Build, Restart Robot.",
-                            "Удалено файлов: %d. Чтобы убрать и саму библиотеку: удалите файлы ASA в OnBot Java, Build, Restart Robot.",
-                            "Fișiere șterse: %d. Ca să scoateți și biblioteca: ștergeți fișierele ASA din OnBot Java, Build, Restart Robot."), n);
+                telemetry.addLine(Html.title(tr("Remove ASA", "Удалить ASA", "Șterge ASA")));
+                if (!plan.usedBy.isEmpty()) {   // removing the library would break the team's build: say where it is used
+                    telemetry.addLine(Html.lv('r', tr("Your code uses Black Box, so nothing is removed. First take it out of:",
+                            "Ваш код использует Black Box, поэтому ничего не удаляется. Сначала уберите его из:",
+                            "Codul vostru folosește Black Box, așa că nu se șterge nimic. Mai întâi scoateți-l din:")));
+                    for (File f : plan.usedBy) telemetry.addLine("&nbsp;&nbsp;" + Html.esc(f.getName()));
+                    telemetry.addLine(Html.dim(tr("then Build, and run Remove ASA again.", "потом Build и снова «Удалить ASA».", "apoi Build și din nou „Șterge ASA”.")));
+                } else {
+                    StringBuilder bar = new StringBuilder();
+                    for (int i = 0; i < 10; i++) bar.append(i < held / 0.3 ? "■" : "□");
+                    telemetry.addLine(Html.c(Html.RED, bar.toString()) + Html.gap() + Html.dim(tr("hold A + B", "держите A + B", "țineți A + B")));
+                    telemetry.addLine(Html.dim(String.format(tr("%d library files, the folder FIRST/asa%s.", "%d файлов библиотеки, папка FIRST/asa%s.",
+                            "%d fișiere ale bibliotecii, folderul FIRST/asa%s."), plan.delete.size(),
+                            plan.keepShared ? tr(" (ASA SysId and its files stay)", " (ASA SysId и его файлы остаются)", " (ASA SysId și fișierele lui rămân)") : "")));
+                    telemetry.addLine(Html.dim(tr("Release to cancel, or press STOP.", "Отпустите, чтобы отменить, или нажмите STOP.", "Eliberați ca să anulați, sau apăsați STOP.")));
+                    if (held >= 3) result = doRemove(plan, javaSrc);
                 }
-                telemetry.addLine(Html.title(tr("Delete ASA data", "Удалить данные ASA", "Șterge datele ASA")));
-                StringBuilder bar = new StringBuilder();
-                for (int i = 0; i < 10; i++) bar.append(i < held / 0.3 ? "■" : "□");
-                telemetry.addLine(Html.c(Html.RED, bar.toString()) + Html.gap() + Html.dim(tr("hold A + B", "держите A + B", "țineți A + B")));
-                telemetry.addLine(Html.dim(tr("Release to cancel, or press STOP.", "Отпустите, чтобы отменить, или нажмите STOP.", "Eliberați ca să anulați, sau apăsați STOP.")));
             } else {
-                telemetry.addLine(Html.lv('g', done));
+                for (String l : result) telemetry.addLine(l);
             }
             telemetry.update();
             idle();
         }
+    }
+
+    private java.util.List<String> doRemove(org.asa.tools.blackbox.AsaRemover.Plan plan, File javaSrc) {
+        java.util.List<String> out = new java.util.ArrayList<String>();
+        AsaAutoRecorder.uninstall();   // nothing of ASA runs from now on, even before the restart
+        AsaWeb.stop();
+        File dir = Recorder.defaultDir();
+        // only a folder named like ours, so a wrong path can never delete anything else
+        int data = dir.getName().equals("asa") || dir.getName().equals("asa-logs") ? delete(dir) : 0;
+        int code = org.asa.tools.blackbox.AsaRemover.apply(plan, javaSrc);
+        out.add(Html.title(tr("ASA removed", "ASA удалена", "ASA ștearsă")));
+        out.add(Html.lv('g', String.format(tr("Deleted: %d library files, %d recordings and settings.", "Удалено: %d файлов библиотеки, %d записей и настроек.",
+                "Șterse: %d fișiere ale bibliotecii, %d înregistrări și setări."), code, data)));
+        out.add(Html.lv('g', tr("Recording and the results page are stopped.", "Запись и страница результатов остановлены.", "Înregistrarea și pagina de rezultate sunt oprite.")));
+        if (plan.nothingInOnBot())
+            out.add(Html.lv('y', tr("No ASA files in OnBot Java: if you installed it with Android Studio, delete the folder org/asa there and install the app again.",
+                    "В OnBot Java файлов ASA нет: если ставили через Android Studio, удалите там папку org/asa и установите приложение заново.",
+                    "În OnBot Java nu sunt fișiere ASA: dacă ați instalat cu Android Studio, ștergeți acolo folderul org/asa și instalați din nou aplicația.")));
+        for (File f : plan.unmarked)
+            out.add(Html.lv('y', tr("Looks like an older ASA file, not deleted, check it yourself: ", "Похоже на файл старой версии ASA, не удалён, проверьте сами: ",
+                    "Pare un fișier dintr-o versiune ASA mai veche, neșters, verificați-l: ") + f.getName()));
+        out.add("");
+        out.add("<b>" + Html.esc(tr("Last step: press STOP, then in OnBot Java press Build.", "Последний шаг: нажмите STOP, потом в OnBot Java нажмите Build.",
+                "Ultimul pas: apăsați STOP, apoi în OnBot Java apăsați Build.")) + "</b>");
+        out.add(Html.dim(tr("ASA Black Box then disappears from the list.", "После этого ASA Black Box исчезнет из списка.", "Apoi ASA Black Box dispare din listă.")));
+        return out;
     }
 
     /** Deletes f and everything inside it; returns how many files were deleted. */

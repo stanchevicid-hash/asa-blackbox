@@ -132,7 +132,7 @@ address. Press START.
 |---|---|
 | **Health check** | Every hub (answering, temperature, voltage), each battery's health from past sessions, and every motor: **Y** turns every motor in turn by itself (0.3 power, 1.5 s each; B stops), or hold A / B to turn the selected one. It tells for each motor: current, encoder counting, direction. INIT: dpad left/right = which battery is in. |
 | **Recording test** | Runs a loop like yours 4 s without and 4 s with the automatic recording, twice, and shows the difference in loop time, how many samples were recorded and whether every encoder was read. No motor turns. The test recording is deleted. |
-| **Delete ASA data** | Deletes the folder `FIRST/asa` (recordings, results, settings) after A + B are held for 3 s. Nothing else. See "Remove ASA completely". |
+| **Remove ASA** | After A + B are held for 3 s: stops the recording and the page, deletes the folder `FIRST/asa` and the library's own files in OnBot Java (only files marked as ASA). Your code and ASA SysId stay; if your code uses Black Box, nothing is deleted. See "Remove ASA completely". |
 | **Center of gravity** | Measures where the center of gravity is (height, front/back, left/right) with the hub's IMU: tip the robot onto its rear, front, right and left wheels until it balances, pressing A each time. It reports how hard the robot can brake, accelerate and turn before it tips, and the steepest ramp it can stand on. The results page **draws it**: top view and side view with the point, the distances in cm and the tipping lines, plus a traffic light for each limit; the drawing downloads as SVG. Do it again with the lift up to see how much the lift moves it. INIT: dpad = wheelbase and track (cm, wheel contact to wheel contact). No motor moves. |
 
 ## Install (2 minutes)
@@ -141,7 +141,7 @@ address. Press START.
 [latest release](https://github.com/stanchevicid-hash/asa-blackbox/releases/latest) and unzip it at the root of your
 FtcRobotController project. The files land in `TeamCode/src/main/java/org/asa/tools/`. Or copy `src/org` there yourself.
 
-**OnBot Java (easiest):** download `asa-blackbox-onbot.zip` from the same release, unzip it, and upload all 16 files
+**OnBot Java (easiest):** download `asa-blackbox-onbot.zip` from the same release, unzip it, and upload all 17 files
 into your usual `teamcode` folder in OnBot Java (no subfolders). Press Build. If the first build fails with
 "bad source file", press Build again: OnBot Java sometimes needs a second build after new files arrive.
 
@@ -250,17 +250,26 @@ java -cp out BlackBoxSelfTest
 
 ## Remove ASA completely
 
-ASA changes nothing in your team's code, the robot configuration or the SDK. Everything it creates is in one folder on
-the Control Hub: `FIRST/asa`. Removing it takes three steps.
+ASA changes nothing in your team's code, the robot configuration or the SDK. All it creates is its own files in OnBot
+Java and one folder on the Control Hub, `FIRST/asa`.
 
-1. **Data (optional).** ASA Black Box → mode "Delete ASA data" → START → hold **A + B** for 3 s. Only the folder
-   `FIRST/asa` is deleted: recordings, results, settings.
-2. **Library files.** In OnBot Java delete the 16 files: `AsaAutoRecorder` `AsaBlackBoxOpMode` `AsaCenterOfGravity` `AsaHealthCheck` `AsaWeb` `AsaWebPage` `BatteryHealth` `BlackBox` `CenterOfGravity` `Dashboard` `Ftc` `FtcBlackBox` `Live` `Recorder` `Rule` `WpiLog` (`.java`). In Android Studio, the folder
-   `TeamCode/src/main/java/org/asa`. Press **Build**.
-3. **Restart Robot.** Until then the library already loaded keeps running in memory. After the restart it is gone:
-   no recording, no page, no ASA program in the list.
+**One button:** ASA Black Box → mode **"Remove ASA"** → START → hold **A + B** for 3 s → STOP → in OnBot Java press
+**Build**. ASA Black Box disappears from the list.
 
-If you added Black Box to your own code (the 4 lines), remove those lines too, or the project will not build.
+What the button deletes, and only that:
+- recordings, results and settings (the folder `FIRST/asa`);
+- the library's files in OnBot Java, only those starting with the line `// ASA Black Box library file`: your own
+  `Recorder.java` or `Rule.java`, if you have one, is not touched;
+- the recording and the results page stop at once, before the Build.
+
+What it does not do:
+- if your code uses Black Box itself (the 4 lines), it deletes **nothing** and shows which files to change first,
+  or your project would no longer build;
+- with ASA SysId installed, the files it shares stay and SysId keeps working;
+- files of an older version without the mark are named for you to check, not deleted.
+
+**By hand** (e.g. installed with Android Studio): delete the 17 files `AsaAutoRecorder` `AsaBlackBoxOpMode` `AsaCenterOfGravity` `AsaHealthCheck` `AsaRemover` `AsaWeb` `AsaWebPage` `BatteryHealth` `BlackBox` `CenterOfGravity` `Dashboard` `Ftc` `FtcBlackBox` `Live` `Recorder` `Rule` `WpiLog` (`.java`) or the folder
+`TeamCode/src/main/java/org/asa`, Build / reinstall the app, then **Restart Robot**.
 
 Only want it off, not removed? ASA Black Box → **Y** → "Automatic recording is off". Then ASA starts nothing when the
 robot is turned on: no recording, no page.

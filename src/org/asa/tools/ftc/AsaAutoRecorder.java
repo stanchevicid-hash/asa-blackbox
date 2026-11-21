@@ -71,6 +71,22 @@ public final class AsaAutoRecorder implements OpModeManagerNotifier.Notification
         if (enabled()) AsaWeb.start();                  // the results page from power-on; switched off (Y): nothing runs
     }
 
+    /** Remove ASA: unhooks the recorder from the robot app at once and stops a recording in progress. */
+    static synchronized void uninstall() {
+        Object o = System.getProperties().get(KEY);
+        if (o instanceof OpModeManagerNotifier.Notifications) {
+            OpModeManagerNotifier.Notifications n = (OpModeManagerNotifier.Notifications) o;
+            try { n.onOpModePostStop(null); } catch (Throwable ignored) {}
+            if (instance != null) try { instance.manager.unregisterListener(n); } catch (Throwable ignored) {}
+        }
+        if (instance != null) {
+            try { instance.onOpModePostStop(null); } catch (Throwable ignored) {}
+            try { instance.manager.unregisterListener(instance); } catch (Throwable ignored) {}
+        }
+        instance = null;
+        System.getProperties().remove(KEY);
+    }
+
     /** True when this copy of the library was hooked into the robot app (at power-on, or by the ASA program). */
     static boolean installed() { return instance != null; }
 

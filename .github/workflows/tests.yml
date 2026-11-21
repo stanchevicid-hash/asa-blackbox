@@ -19,6 +19,10 @@ jobs:
         run: |
           javac --release 8 -d out-feat src/org/asa/tools/core/*.java src/org/asa/tools/blackbox/*.java test/BlackBoxFeaturesTest.java
           java -cp out-feat BlackBoxFeaturesTest
+      - name: Remove ASA deletes only ASA files - never a team's file, never what SysId needs, nothing while used
+        run: |
+          javac --release 8 -d out-rm src/org/asa/tools/core/*.java src/org/asa/tools/blackbox/*.java test/RemoverTest.java
+          java -cp out-rm RemoverTest
       - name: Detectors - overheating, wheel dragging, frozen IMU, loop pause, gamepad lost, low battery at start
         run: |
           javac --release 8 -d out-det src/org/asa/tools/core/*.java src/org/asa/tools/blackbox/*.java test/BlackBoxDetectorsTest.java
