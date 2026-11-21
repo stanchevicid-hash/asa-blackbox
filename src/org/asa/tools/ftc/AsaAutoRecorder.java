@@ -68,7 +68,7 @@ public final class AsaAutoRecorder implements OpModeManagerNotifier.Notification
         instance = new AsaAutoRecorder(m);
         m.registerListener(instance);
         System.getProperties().put(KEY, instance);
-        AsaWeb.start();                                  // the results page is there from the moment the robot is on
+        if (enabled()) AsaWeb.start();                  // the results page from power-on; switched off (Y): nothing runs
     }
 
     /** True when this copy of the library was hooked into the robot app (at power-on, or by the ASA program). */

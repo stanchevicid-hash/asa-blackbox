@@ -132,6 +132,7 @@ address. Press START.
 |---|---|
 | **Health check** | Every hub (answering, temperature, voltage), each battery's health from past sessions, and every motor: **Y** turns every motor in turn by itself (0.3 power, 1.5 s each; B stops), or hold A / B to turn the selected one. It tells for each motor: current, encoder counting, direction. INIT: dpad left/right = which battery is in. |
 | **Recording test** | Runs a loop like yours 4 s without and 4 s with the automatic recording, twice, and shows the difference in loop time, how many samples were recorded and whether every encoder was read. No motor turns. The test recording is deleted. |
+| **Delete ASA data** | Deletes the folder `FIRST/asa` (recordings, results, settings) after A + B are held for 3 s. Nothing else. See "Remove ASA completely". |
 | **Center of gravity** | Measures where the center of gravity is (height, front/back, left/right) with the hub's IMU: tip the robot onto its rear, front, right and left wheels until it balances, pressing A each time. It reports how hard the robot can brake, accelerate and turn before it tips, and the steepest ramp it can stand on. The results page **draws it**: top view and side view with the point, the distances in cm and the tipping lines, plus a traffic light for each limit; the drawing downloads as SVG. Do it again with the lift up to see how much the lift moves it. INIT: dpad = wheelbase and track (cm, wheel contact to wheel contact). No motor moves. |
 
 ## Install (2 minutes)
@@ -246,6 +247,23 @@ reads, and that a disk error is reported instead of thrown.
 javac --release 8 -d out src/org/asa/tools/core/*.java src/org/asa/tools/blackbox/*.java test/BlackBoxSelfTest.java
 java -cp out BlackBoxSelfTest
 ```
+
+## Remove ASA completely
+
+ASA changes nothing in your team's code, the robot configuration or the SDK. Everything it creates is in one folder on
+the Control Hub: `FIRST/asa`. Removing it takes three steps.
+
+1. **Data (optional).** ASA Black Box → mode "Delete ASA data" → START → hold **A + B** for 3 s. Only the folder
+   `FIRST/asa` is deleted: recordings, results, settings.
+2. **Library files.** In OnBot Java delete the 16 files: `AsaAutoRecorder` `AsaBlackBoxOpMode` `AsaCenterOfGravity` `AsaHealthCheck` `AsaWeb` `AsaWebPage` `BatteryHealth` `BlackBox` `CenterOfGravity` `Dashboard` `Ftc` `FtcBlackBox` `Live` `Recorder` `Rule` `WpiLog` (`.java`). In Android Studio, the folder
+   `TeamCode/src/main/java/org/asa`. Press **Build**.
+3. **Restart Robot.** Until then the library already loaded keeps running in memory. After the restart it is gone:
+   no recording, no page, no ASA program in the list.
+
+If you added Black Box to your own code (the 4 lines), remove those lines too, or the project will not build.
+
+Only want it off, not removed? ASA Black Box → **Y** → "Automatic recording is off". Then ASA starts nothing when the
+robot is turned on: no recording, no page.
 
 ## Status
 
